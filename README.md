@@ -109,6 +109,12 @@ npm run format
 npm test
 ```
 
+## Deployment
+
+```
+npm run deploy           # build and deploy to GitHub Pages
+```
+
 ---
 
 ## Roadmap
