@@ -1,13 +1,19 @@
-import type { Route } from "./+types/home";
-import { Welcome } from "../welcome/welcome";
+import type { Route } from './+types/home'
+import { CycleMap } from '~/presentation/components/map/CycleMap'
+import { BottomSheet } from '~/presentation/components/layout/BottomSheet'
 
-export function meta({}: Route.MetaArgs) {
+export function meta(_: Route.MetaArgs) {
   return [
-    { title: "New React Router App" },
-    { name: "description", content: "Welcome to React Router!" },
-  ];
+    { title: 'CycleRoute' },
+    { name: 'description', content: 'Build bike-lane-first cycling routes in your city.' },
+  ]
 }
 
 export default function Home() {
-  return <Welcome />;
+  return (
+    <div className="relative h-full w-full overflow-hidden">
+      <CycleMap />
+      <BottomSheet />
+    </div>
+  )
 }
