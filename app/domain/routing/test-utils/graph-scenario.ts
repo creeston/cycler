@@ -12,6 +12,8 @@ export interface ScenarioExpect {
   maxGaps?: number
   /** One or more exact node sequences that must each appear in found routes. */
   routes?: string[][]
+  /** At least one of these exact node sequences must appear in found routes. */
+  anyRoute?: string[][]
   /** If true, at least one found route must start and end at the same node. */
   isRoundTrip?: boolean
 }
@@ -21,6 +23,8 @@ export interface Scenario {
   description: string
   graph: BikeLaneGraph
   startKey: string
+  /** When set, triggers one-way routing from startKey to endKey. */
+  endKey?: string
   minDist: number
   maxDist: number
   roundTrip: boolean
@@ -78,12 +82,16 @@ export function loadScenario(filePath: string): Scenario {
   if (ga.expect_route !== undefined) {
     expect.routes = ga.expect_route.split(';').map(r => r.trim().split(','))
   }
+  if (ga.expect_any_route !== undefined) {
+    expect.anyRoute = ga.expect_any_route.split(';').map(r => r.trim().split(','))
+  }
 
   return {
     name,
     description: ga.description ?? '',
     graph,
     startKey: ga.start ?? edges[0]?.from ?? '',
+    endKey: ga.end,
     minDist: parseFloat(ga.minDist ?? '100'),
     maxDist: parseFloat(ga.maxDist ?? '100000'),
     roundTrip: ga.roundTrip === 'true',

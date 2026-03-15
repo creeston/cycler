@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { loadScenario } from './test-utils/graph-scenario'
-import { runWalks } from './route-finder'
+import { runWalks, runOneWay } from './route-finder'
 import { coordKey } from './algorithms'
 import type { Route } from '../entities/route'
 import type { RouteSegment } from '../entities/route'
-import type { ScenarioExpect } from './test-utils/graph-scenario'
+import type { Scenario, ScenarioExpect } from './test-utils/graph-scenario'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const scenario = (name: string) => join(__dirname, 'scenarios', 'graph-to-path', name)
@@ -22,6 +22,13 @@ function routeNodeSequence(segments: RouteSegment[], keyToName: Map<string, stri
   const lc = lastSeg.geometry.coordinates[lastSeg.geometry.coordinates.length - 1]
   nodes.push(keyToName.get(coordKey(lc[0], lc[1])) ?? '?')
   return nodes
+}
+
+function runScenario(sc: Scenario): Route[] {
+  if (sc.endKey) {
+    return runOneWay(sc.graph, sc.startKey, sc.endKey, sc.minDist, sc.maxDist)
+  }
+  return runWalks(sc.graph, sc.startKey, sc.minDist, sc.maxDist, sc.roundTrip)
 }
 
 function check(routes: Route[], ex: ScenarioExpect, keyToName: Map<string, string>) {
@@ -62,36 +69,55 @@ function check(routes: Route[], ex: ScenarioExpect, keyToName: Map<string, strin
       ).toBe(true)
     }
   }
+
+  if (ex.anyRoute && ex.anyRoute.length > 0) {
+    const foundSequences = routes.map(r => routeNodeSequence(r.segments, keyToName).join(','))
+    const keys = ex.anyRoute.map(r => r.join(','))
+    expect(
+      keys.some(k => foundSequences.includes(k)),
+      `Expected at least one of [${keys.join(' | ')}] but found: ${foundSequences.join(' | ') || '(none)'}`,
+    ).toBe(true)
+  }
 }
 
 describe('graph routing scenarios', () => {
   it('simple-chain: finds the exact route A,B,C,D,E on a straight connected chain', () => {
     const sc = loadScenario(scenario('simple-chain.dot'))
-    check(runWalks(sc.graph, sc.startKey, sc.minDist, sc.maxDist, sc.roundTrip), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc.expect, sc.keyToName)
   })
 
   it('gap-bridging: finds exact route A,B,C,D,E,F traversing the gap edge', () => {
     const sc = loadScenario(scenario('gap-bridging.dot'))
-    check(runWalks(sc.graph, sc.startKey, sc.minDist, sc.maxDist, sc.roundTrip), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc.expect, sc.keyToName)
   })
 
   it('dead-end: finds exact route A,B,C,E,F bypassing the dead-end branch', () => {
     const sc = loadScenario(scenario('dead-end.dot'))
-    check(runWalks(sc.graph, sc.startKey, sc.minDist, sc.maxDist, sc.roundTrip), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc.expect, sc.keyToName)
   })
 
   it('branching: discovers both routes A,B,C,E and A,B,D,F through the fork', () => {
     const sc = loadScenario(scenario('branching.dot'))
-    check(runWalks(sc.graph, sc.startKey, sc.minDist, sc.maxDist, sc.roundTrip), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc.expect, sc.keyToName)
   })
 
   it('isolated-lanes: returns no routes when all segments are too short', () => {
     const sc = loadScenario(scenario('isolated-lanes.dot'))
-    check(runWalks(sc.graph, sc.startKey, sc.minDist, sc.maxDist, sc.roundTrip), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc.expect, sc.keyToName)
   })
 
   it('round-trip: finds a circular route returning to start without repeating edges', () => {
     const sc = loadScenario(scenario('round-trip.dot'))
-    check(runWalks(sc.graph, sc.startKey, sc.minDist, sc.maxDist, sc.roundTrip), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc.expect, sc.keyToName)
+  })
+
+  it('one-way-chain: finds the single route A→E on a straight chain', () => {
+    const sc = loadScenario(scenario('one-way-chain.dot'))
+    check(runScenario(sc), sc.expect, sc.keyToName)
+  })
+
+  it('one-way-branching: finds shortest path A→E through a fork (either branch)', () => {
+    const sc = loadScenario(scenario('one-way-branching.dot'))
+    check(runScenario(sc), sc.expect, sc.keyToName)
   })
 })

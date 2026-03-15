@@ -87,3 +87,31 @@ export function nearestNode(graph: BikeLaneGraph, lon: number, lat: number): str
   })
   return nearest
 }
+
+/**
+ * Returns keys of all graph nodes within maxMeters of the given coordinate.
+ * Uses the same equirectangular approximation as gap detection.
+ * Falls back to the single nearest node when none are within the radius,
+ * so the result is never empty as long as the graph has at least one node.
+ */
+export function nodesWithinMeters(
+  graph: BikeLaneGraph,
+  lon: number,
+  lat: number,
+  maxMeters: number,
+): string[] {
+  const maxDeg = (maxMeters / 111_000) * 1.5
+  const candidates: string[] = []
+
+  graph.forEachNode((key, a) => {
+    if (Math.abs(a.lat - lat) > maxDeg || Math.abs(a.lon - lon) > maxDeg * 2) return
+    if (approxMeters(lon, lat, a.lon, a.lat) <= maxMeters) candidates.push(key)
+  })
+
+  if (candidates.length === 0) {
+    const nearest = nearestNode(graph, lon, lat)
+    if (nearest) candidates.push(nearest)
+  }
+
+  return candidates
+}
