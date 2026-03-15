@@ -1,6 +1,7 @@
 import Graph from 'graphology'
 import { readFileSync } from 'fs'
 import { parseDot } from './dot-parser'
+import { coordKey } from '../algorithms'
 import type { BikeLaneGraph } from '../graph'
 
 export interface ScenarioExpect {
@@ -9,6 +10,10 @@ export interface ScenarioExpect {
   minCoverage?: number
   hasGap?: boolean
   maxGaps?: number
+  /** One or more exact node sequences that must each appear in found routes. */
+  routes?: string[][]
+  /** If true, at least one found route must start and end at the same node. */
+  isRoundTrip?: boolean
 }
 
 export interface Scenario {
@@ -18,6 +23,9 @@ export interface Scenario {
   startKey: string
   minDist: number
   maxDist: number
+  roundTrip: boolean
+  /** Maps coordKey(lon, lat) → node name for route sequence verification. */
+  keyToName: Map<string, string>
   expect: ScenarioExpect
 }
 
@@ -54,12 +62,22 @@ export function loadScenario(filePath: string): Scenario {
     })
   }
 
+  // Build reverse map: coordKey(lon, lat) → node name for route verification
+  const keyToName = new Map<string, string>()
+  graph.forEachNode((nodeName, attrs) => {
+    keyToName.set(coordKey(attrs.lon, attrs.lat), nodeName)
+  })
+
   const expect: ScenarioExpect = {}
   if (ga.expect_minRoutes !== undefined) expect.minRoutes = parseInt(ga.expect_minRoutes, 10)
   if (ga.expect_maxRoutes !== undefined) expect.maxRoutes = parseInt(ga.expect_maxRoutes, 10)
   if (ga.expect_minCoverage !== undefined) expect.minCoverage = parseFloat(ga.expect_minCoverage)
   if (ga.expect_hasGap !== undefined) expect.hasGap = ga.expect_hasGap === 'true'
   if (ga.expect_maxGaps !== undefined) expect.maxGaps = parseInt(ga.expect_maxGaps, 10)
+  if (ga.expect_isRoundTrip !== undefined) expect.isRoundTrip = ga.expect_isRoundTrip === 'true'
+  if (ga.expect_route !== undefined) {
+    expect.routes = ga.expect_route.split(';').map(r => r.trim().split(','))
+  }
 
   return {
     name,
@@ -68,6 +86,8 @@ export function loadScenario(filePath: string): Scenario {
     startKey: ga.start ?? edges[0]?.from ?? '',
     minDist: parseFloat(ga.minDist ?? '100'),
     maxDist: parseFloat(ga.maxDist ?? '100000'),
+    roundTrip: ga.roundTrip === 'true',
+    keyToName,
     expect,
   }
 }

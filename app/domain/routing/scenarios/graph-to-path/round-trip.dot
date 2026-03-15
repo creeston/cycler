@@ -1,0 +1,26 @@
+// Start at A (gap node), cycle through bike lanes B-C-D, return to A via gap.
+// No edge may be traversed twice — the route must form a full circle.
+// Both traversal directions are valid: A→B→C→D→A or A→D→C→B→A.
+//
+//   B --200m(lane)-- C --200m(lane)-- D
+//   |                                 |
+//  50m(gap)                         50m(gap)
+//   |                                 |
+//                    A
+//
+graph round_trip {
+  graph [
+    description = "Round trip from gap node A through a cycle of bike lanes",
+    start = "A",
+    minDist = 400,
+    maxDist = 5000,
+    roundTrip = "true",
+    expect_isRoundTrip = "true",
+    expect_route = "A,B,C,D,A;A,D,C,B,A"
+  ]
+
+  A -- B [distance=50, type=gap]
+  B -- C [distance=200, type=lane]
+  C -- D [distance=200, type=lane]
+  D -- A [distance=50, type=gap]
+}

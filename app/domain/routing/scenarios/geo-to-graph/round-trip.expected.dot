@@ -1,0 +1,10 @@
+// Three bike lanes forming a closed triangle — a graph with 3 nodes and 3 lane edges.
+// Verifies that buildGraph correctly handles a cycle in the input lanes.
+//
+//   A --lane-- B --lane-- C --lane-- A
+//
+graph round_trip {
+  A -- B [type=lane]
+  B -- C [type=lane]
+  C -- A [type=lane]
+}

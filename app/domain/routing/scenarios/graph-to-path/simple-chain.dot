@@ -7,11 +7,9 @@ graph simple_chain {
   graph [
     description = "Straight chain of four connected lanes",
     start = "A",
-    minDist = 400,
+    minDist = 800,
     maxDist = 5000,
-    expect_minRoutes = 1,
-    expect_hasGap = "false",
-    expect_minCoverage = "1.0"
+    expect_route = "A,B,C,D,E"
   ]
 
   A -- B [distance=200, type=lane]

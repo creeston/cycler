@@ -18,14 +18,12 @@ function cacheKey(lon: number, lat: number, maxGap: number): string {
 export function buildRoute(
   lanes: BikeLane[],
   preferences: RoutePreferences,
-  startLon: number,
-  startLat: number,
 ): Route {
-  const key = cacheKey(startLon, startLat, preferences.maxGapMeters)
+  const key = cacheKey(preferences.startLon, preferences.startLat, preferences.maxGapMeters)
   let entry = cache.get(key)
 
   if (!entry || entry.routes.length === 0) {
-    const found = findRoutes(lanes, startLon, startLat, preferences)
+    const found = findRoutes(lanes, preferences)
     if (found.length === 0) {
       throw new Error(
         'No route found in this area. Try fetching a larger area or moving to a zone with more bike lanes.',

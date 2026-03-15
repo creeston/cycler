@@ -31,7 +31,7 @@ export function useRoute() {
     await new Promise(resolve => setTimeout(resolve, 0))
     try {
       const [startLon, startLat] = await resolveStartPoint(viewport.longitude, viewport.latitude)
-      const route = buildRoute(bikeLanes, preferences, startLon, startLat)
+      const route = buildRoute(bikeLanes, { ...preferences, startLon, startLat })
       setRoute(route)
     } catch (err) {
       setRouteError(err instanceof Error ? err.message : 'Failed to build route')

@@ -13,8 +13,7 @@ graph dead_end {
     start = "A",
     minDist = 800,
     maxDist = 5000,
-    expect_minRoutes = 1,
-    expect_hasGap = "false"
+    expect_route = "A,B,C,E,F"
   ]
 
   A -- B [distance=200, type=lane]

@@ -38,4 +38,8 @@ describe('geo to graph conversion scenarios', () => {
   it('shared-endpoint: three lanes meeting at B produce a single node with degree 3', () => {
     checkGeoGraph(loadGeoGraphScenario(geojson('shared-endpoint'), expectedDot('shared-endpoint')))
   })
+
+  it('round-trip: three lanes forming a closed triangle produce 3 nodes and 3 lane edges', () => {
+    checkGeoGraph(loadGeoGraphScenario(geojson('round-trip'), expectedDot('round-trip')))
+  })
 })
