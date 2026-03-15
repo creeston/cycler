@@ -1,0 +1,25 @@
+// Main path with a short dead-end branch off node C.
+// Walks that take the dead-end (C -> D) accumulate only 500 m and return null.
+// The algorithm must eventually find the valid path through E and F.
+// minDist=800 ensures only the long path qualifies.
+//
+//             D (dead end, 100 m from C)
+//             |
+//   A --200m-- B --200m-- C --200m-- E --200m-- F
+//
+graph dead_end {
+  graph [
+    description = "Dead-end branch forces the walk to retry until it finds the long path",
+    start = "A",
+    minDist = 800,
+    maxDist = 5000,
+    expect_minRoutes = 1,
+    expect_hasGap = "false"
+  ]
+
+  A -- B [distance=200, type=lane]
+  B -- C [distance=200, type=lane]
+  C -- D [distance=100, type=lane]
+  C -- E [distance=200, type=lane]
+  E -- F [distance=200, type=lane]
+}

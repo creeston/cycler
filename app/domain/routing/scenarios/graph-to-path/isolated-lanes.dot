@@ -1,0 +1,18 @@
+// Two lane segments with no connection between them.
+// Each segment is 50 m, both are shorter than minDist=200 m.
+// Every walk from A dead-ends at B with total < minDist, so no routes are returned.
+//
+//   A --50m-- B        C --50m-- D   (disconnected)
+//
+graph isolated_lanes {
+  graph [
+    description = "Disconnected segments too short to meet minDist — expects no routes",
+    start = "A",
+    minDist = 200,
+    maxDist = 5000,
+    expect_maxRoutes = 0
+  ]
+
+  A -- B [distance=50, type=lane]
+  C -- D [distance=50, type=lane]
+}

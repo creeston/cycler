@@ -1,0 +1,23 @@
+// Path that forks at B into two equal-length branches.
+// minDist=600 forces the walk one step past the fork, ensuring the two routes
+// diverge in their third segment and are not collapsed by the signature deduplicator.
+//
+//   A --200m-- B --200m-- C --200m-- E
+//              |
+//              +--200m-- D --200m-- F
+//
+graph branching {
+  graph [
+    description = "Fork at B produces two distinct valid routes",
+    start = "A",
+    minDist = 600,
+    maxDist = 5000,
+    expect_minRoutes = 2
+  ]
+
+  A -- B [distance=200, type=lane]
+  B -- C [distance=200, type=lane]
+  C -- E [distance=200, type=lane]
+  B -- D [distance=200, type=lane]
+  D -- F [distance=200, type=lane]
+}

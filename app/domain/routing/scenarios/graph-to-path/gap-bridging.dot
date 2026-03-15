@@ -1,0 +1,23 @@
+// Two lane clusters connected by a gap edge.
+// The walk is forced to cross the gap because it is the only way forward from C.
+// minDist is set high enough that the walk must continue past the gap.
+//
+//   A --200m-- B --200m-- C ~~150m gap~~ D --200m-- E --200m-- F
+//
+graph gap_bridging {
+  graph [
+    description = "Two lane segments joined by a single gap; walk must cross it",
+    start = "A",
+    minDist = 700,
+    maxDist = 5000,
+    expect_minRoutes = 1,
+    expect_hasGap = "true",
+    expect_maxGaps = 1
+  ]
+
+  A -- B [distance=200, type=lane]
+  B -- C [distance=200, type=lane]
+  C -- D [distance=150, type=gap]
+  D -- E [distance=200, type=lane]
+  E -- F [distance=200, type=lane]
+}

@@ -1,0 +1,14 @@
+// Lanes 1, 2, and 3 all touch node B (0.001, 0.000).
+// buildGraph must merge them into a single node with degree 3.
+//
+//         C
+//         ║ lane-2
+//   ══════ B ══════ D
+//   lane-1     lane-3
+//   A
+//
+graph shared_endpoint {
+  A -- B [type=lane]
+  C -- B [type=lane]
+  B -- D [type=lane]
+}

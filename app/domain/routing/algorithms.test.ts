@@ -1,19 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { coordKey } from './algorithms'
 import { buildGraph, nearestNode } from './graph'
-import { findRoutes } from './route-finder'
 import type { BikeLane } from '../entities/bike-lane'
-import type { RoutePreferences } from '../entities/route'
 
 function makeLane(id: string, coords: [number, number][]): BikeLane {
   return { id, osmId: id, geometry: { type: 'LineString', coordinates: coords }, laneType: 'cycleway', tags: {} }
-}
-
-const PREFS: RoutePreferences = {
-  maxGapMeters: 200,
-  minDistanceMeters: 100,
-  maxDistanceMeters: 100_000,
-  roundTrip: false,
 }
 
 // ── coordKey ──────────────────────────────────────────────────────────────────
@@ -84,36 +75,3 @@ describe('nearestNode', () => {
   })
 })
 
-// ── findRoutes ────────────────────────────────────────────────────────────────
-
-describe('findRoutes', () => {
-  it('returns an empty array when there are no lanes', () => {
-    expect(findRoutes([], 0, 0, PREFS)).toEqual([])
-  })
-
-  it('returns routes whose distance is within [min, max]', () => {
-    // Build a chain of lanes long enough to reach 100 m minimum
-    // Each segment: ~111 m (0.001° latitude ≈ 111 m)
-    const lanes = Array.from({ length: 10 }, (_, i) =>
-      makeLane(String(i), [[0, i * 0.001], [0, (i + 1) * 0.001]]),
-    )
-    const routes = findRoutes(lanes, 0, 0, PREFS)
-    for (const r of routes) {
-      expect(r.totalDistanceMeters).toBeGreaterThanOrEqual(PREFS.minDistanceMeters)
-      expect(r.totalDistanceMeters).toBeLessThanOrEqual(PREFS.maxDistanceMeters)
-    }
-  })
-
-  it('route segments reference valid geometries', () => {
-    const lanes = Array.from({ length: 5 }, (_, i) =>
-      makeLane(String(i), [[0, i * 0.001], [0, (i + 1) * 0.001]]),
-    )
-    const routes = findRoutes(lanes, 0, 0, PREFS)
-    if (routes.length > 0) {
-      for (const seg of routes[0].segments) {
-        expect(seg.geometry.type).toBe('LineString')
-        expect(seg.geometry.coordinates.length).toBeGreaterThanOrEqual(2)
-      }
-    }
-  })
-})

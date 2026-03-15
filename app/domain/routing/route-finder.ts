@@ -79,7 +79,7 @@ function signature(segments: RouteSegment[]): string {
   return segments.map(s => s.geometry.coordinates[0].join(',')).join('|')
 }
 
-function runWalks(
+export function runWalks(
   graph: BikeLaneGraph,
   startKey: string,
   minDist: number,

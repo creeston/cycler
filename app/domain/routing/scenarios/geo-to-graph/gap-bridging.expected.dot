@@ -1,0 +1,11 @@
+// B and C are ~56 m apart (0.0005° lon at equator ≈ 55.7 m).
+// With _maxGapMeters=100 a synthetic gap edge must bridge them.
+//
+//   ══════ A ══════ B  ·····  C ══════ D ══════
+//          lane-1       gap        lane-2
+//
+graph gap_bridging {
+  A -- B [type=lane]
+  C -- D [type=lane]
+  B -- C [type=gap]
+}

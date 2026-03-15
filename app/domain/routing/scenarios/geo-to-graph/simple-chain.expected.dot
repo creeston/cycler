@@ -1,0 +1,9 @@
+// Two lanes sharing endpoint B — B must be merged into a single node.
+//
+//   ══════ A ══════ B ══════ C ══════
+//          lane-1      lane-2
+//
+graph simple_chain {
+  A -- B [type=lane]
+  B -- C [type=lane]
+}
