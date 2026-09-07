@@ -4,7 +4,10 @@ import { geojsonToBikeLanes } from './osm-to-domain'
 
 function makeLineFeature(
   props: Record<string, string>,
-  coords = [[0, 0], [1, 1]] as [number, number][],
+  coords = [
+    [0, 0],
+    [1, 1],
+  ] as [number, number][],
 ): Feature<LineString> {
   return {
     type: 'Feature',
@@ -50,7 +53,9 @@ describe('geojsonToBikeLanes', () => {
   })
 
   it('preserves name and surface tags', () => {
-    const fc = makeFC([makeLineFeature({ highway: 'cycleway', name: 'Bike Path 1', surface: 'asphalt' })])
+    const fc = makeFC([
+      makeLineFeature({ highway: 'cycleway', name: 'Bike Path 1', surface: 'asphalt' }),
+    ])
     const [lane] = geojsonToBikeLanes(fc)
     expect(lane.name).toBe('Bike Path 1')
     expect(lane.surface).toBe('asphalt')

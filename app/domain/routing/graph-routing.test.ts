@@ -32,11 +32,9 @@ function runScenario(sc: Scenario): Route[] {
 }
 
 function check(routes: Route[], ex: ScenarioExpect, keyToName: Map<string, string>) {
-  if (ex.minRoutes !== undefined)
-    expect(routes.length).toBeGreaterThanOrEqual(ex.minRoutes)
+  if (ex.minRoutes !== undefined) expect(routes.length).toBeGreaterThanOrEqual(ex.minRoutes)
 
-  if (ex.maxRoutes !== undefined)
-    expect(routes.length).toBeLessThanOrEqual(ex.maxRoutes)
+  if (ex.maxRoutes !== undefined) expect(routes.length).toBeLessThanOrEqual(ex.maxRoutes)
 
   if (ex.hasGap !== undefined && routes.length > 0)
     expect(routes.some(r => r.gapCount > 0)).toBe(ex.hasGap)

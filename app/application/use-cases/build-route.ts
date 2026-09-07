@@ -15,10 +15,7 @@ function cacheKey(lon: number, lat: number, maxGap: number): string {
   return `${lon.toFixed(3)},${lat.toFixed(3)},${maxGap}`
 }
 
-export function buildRoute(
-  lanes: BikeLane[],
-  preferences: RoutePreferences,
-): Route {
+export function buildRoute(lanes: BikeLane[], preferences: RoutePreferences): Route {
   const key = cacheKey(preferences.startLon, preferences.startLat, preferences.maxGapMeters)
   let entry = cache.get(key)
 

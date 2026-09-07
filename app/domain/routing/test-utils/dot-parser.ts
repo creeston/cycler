@@ -37,9 +37,7 @@ export function parseDot(content: string): ParsedDotGraph {
   const graphAttrs = graphBlockMatch ? parseAttrBlock(graphBlockMatch[1]) : {}
 
   // Strip graph attr block and quoted strings before scanning for edge declarations
-  const forEdges = cleaned
-    .replace(/\bgraph\s*\[([\s\S]*?)\]/g, '')
-    .replace(/"[^"]*"/g, '""')
+  const forEdges = cleaned.replace(/\bgraph\s*\[([\s\S]*?)\]/g, '').replace(/"[^"]*"/g, '""')
 
   const edges: ParsedEdge[] = []
   const edgeRe = /\b(\w+)\s*--\s*(\w+)(?:\s*\[([^\]]*)\])?/g

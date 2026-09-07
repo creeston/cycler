@@ -2,9 +2,7 @@ import type { Route } from '~/domain/entities/route'
 
 export function routeToGpx(route: Route, name = 'Cycle Route'): string {
   const trkpts = route.segments.flatMap(seg =>
-    seg.geometry.coordinates.map(
-      ([lon, lat]) => `    <trkpt lat="${lat}" lon="${lon}"></trkpt>`,
-    ),
+    seg.geometry.coordinates.map(([lon, lat]) => `    <trkpt lat="${lat}" lon="${lon}"></trkpt>`),
   )
 
   return `<?xml version="1.0" encoding="UTF-8"?>

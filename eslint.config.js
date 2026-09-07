@@ -5,7 +5,15 @@ import prettierConfig from 'eslint-config-prettier'
 import globals from 'globals'
 
 export default tseslint.config(
-  { ignores: ['build/', 'node_modules/', '.react-router/'] },
+  {
+    ignores: [
+      'build/',
+      'node_modules/',
+      'node_modules.pre-refresh/',
+      '.npm-cache/',
+      '.react-router/',
+    ],
+  },
   tseslint.configs.recommended,
   {
     plugins: {

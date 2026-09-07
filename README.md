@@ -100,14 +100,38 @@ npm run test:coverage    # with coverage report
 
 ## Development
 
+Requires Node.js 24 LTS and npm 11 or newer.
+
 ```bash
-npm install
+npm ci                   # reproducible install from package-lock.json
 npm run dev              # http://localhost:5173
 npm run typecheck
 npm run lint
 npm run format
 npm test
+npm run check            # run the complete pre-commit verification suite
 ```
+
+### Dependency security
+
+The repository-level `.npmrc` quarantines releases younger than three days,
+rejects unreviewed dependency install scripts, blocks git/file/URL dependency
+specifiers, and treats peer-dependency conflicts as errors. The committed
+lockfile provides the exact dependency tree used by `npm ci`.
+
+When updating a dependency, review its source, maintainers, changelog, and the
+`package.json`/`package-lock.json` diff before merging. Then run:
+
+```bash
+npm run check                # includes npm audit for high/critical findings
+npm run security:signatures  # verify signatures/provenance if the registry supports it
+```
+
+If a reviewed dependency genuinely needs an install script, approve that exact
+package and version with `npm approve-scripts`; npm records the decision in the
+root `allowScripts` policy. Do not bypass failures with `--force`,
+`--legacy-peer-deps`, or `--dangerously-allow-all-scripts` without reviewing the
+resulting dependency and lockfile changes.
 
 ## Deployment
 

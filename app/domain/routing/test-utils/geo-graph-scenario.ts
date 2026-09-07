@@ -38,10 +38,12 @@ export function loadGeoGraphScenario(
     if (feature.geometry?.type !== 'LineString') continue
     const coords = (feature.geometry as LineString).coordinates
     const props = (feature.properties ?? {}) as Record<string, string>
-    if (props._nodeStart)
-      nameToKey.set(props._nodeStart, coordKey(coords[0][0], coords[0][1]))
+    if (props._nodeStart) nameToKey.set(props._nodeStart, coordKey(coords[0][0], coords[0][1]))
     if (props._nodeEnd)
-      nameToKey.set(props._nodeEnd, coordKey(coords[coords.length - 1][0], coords[coords.length - 1][1]))
+      nameToKey.set(
+        props._nodeEnd,
+        coordKey(coords[coords.length - 1][0], coords[coords.length - 1][1]),
+      )
   }
 
   const { edges: dotEdges } = parseDot(readFileSync(expectedDotPath, 'utf-8'))

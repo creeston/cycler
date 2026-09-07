@@ -30,36 +30,37 @@ export function useBikeLanes() {
         .flatMap(a => a.bikeLanes)
       if (lanes.length > 0) setBikeLanes(lanes)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const fetch = useCallback(
-    async () => {
-      if (!bbox || isLoading) return
-      const { widthKm, heightKm } = bboxDimensionsKm(bbox)
-      if (widthKm > MAX_AREA_KM || heightKm > MAX_AREA_KM) {
-        setFetchError(`Zoom in closer — current area is ${Math.round(widthKm)}×${Math.round(heightKm)} km. Maximum is ${MAX_AREA_KM}×${MAX_AREA_KM} km.`)
-        return
-      }
-      setLoading(true)
-      setFetchError(null)
-      try {
-        const lanes = await fetchBikeLanes(bbox, true)
-        setBikeLanes(lanes)
-        clearRouteCache()
-      } catch (err) {
-        setFetchError(err instanceof Error ? err.message : 'Failed to fetch bike lanes')
-      } finally {
-        setLoading(false)
-      }
-    },
-    [bbox, isLoading, setLoading, setBikeLanes, setFetchError],
-  )
-
-  const isAreaTooLarge = bbox ? (() => {
+  const fetch = useCallback(async () => {
+    if (!bbox || isLoading) return
     const { widthKm, heightKm } = bboxDimensionsKm(bbox)
-    return widthKm > MAX_AREA_KM || heightKm > MAX_AREA_KM
-  })() : false
+    if (widthKm > MAX_AREA_KM || heightKm > MAX_AREA_KM) {
+      setFetchError(
+        `Zoom in closer — current area is ${Math.round(widthKm)}×${Math.round(heightKm)} km. Maximum is ${MAX_AREA_KM}×${MAX_AREA_KM} km.`,
+      )
+      return
+    }
+    setLoading(true)
+    setFetchError(null)
+    try {
+      const lanes = await fetchBikeLanes(bbox, true)
+      setBikeLanes(lanes)
+      clearRouteCache()
+    } catch (err) {
+      setFetchError(err instanceof Error ? err.message : 'Failed to fetch bike lanes')
+    } finally {
+      setLoading(false)
+    }
+  }, [bbox, isLoading, setLoading, setBikeLanes, setFetchError])
+
+  const isAreaTooLarge = bbox
+    ? (() => {
+        const { widthKm, heightKm } = bboxDimensionsKm(bbox)
+        return widthKm > MAX_AREA_KM || heightKm > MAX_AREA_KM
+      })()
+    : false
 
   return { fetch, bikeLanes, isLoading, lastFetchedAt, isAreaTooLarge }
 }

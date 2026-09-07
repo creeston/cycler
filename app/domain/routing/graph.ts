@@ -42,11 +42,18 @@ export function buildGraph(lanes: BikeLane[], maxGapMeters: number): BikeLaneGra
     const endKey = coordKey(coords[coords.length - 1][0], coords[coords.length - 1][1])
 
     graph.mergeNode(startKey, { lon: coords[0][0], lat: coords[0][1] })
-    graph.mergeNode(endKey, { lon: coords[coords.length - 1][0], lat: coords[coords.length - 1][1] })
+    graph.mergeNode(endKey, {
+      lon: coords[coords.length - 1][0],
+      lat: coords[coords.length - 1][1],
+    })
 
     if (startKey !== endKey && !graph.hasEdge(startKey, endKey)) {
       const dist = turf.length(turf.feature(lane.geometry), { units: 'meters' })
-      graph.addEdge(startKey, endKey, { distanceMeters: dist, isGap: false, geometry: lane.geometry })
+      graph.addEdge(startKey, endKey, {
+        distanceMeters: dist,
+        isGap: false,
+        geometry: lane.geometry,
+      })
     }
   }
 
@@ -60,14 +67,21 @@ export function buildGraph(lanes: BikeLane[], maxGapMeters: number): BikeLaneGra
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         if (graph.hasEdge(nodes[i], nodes[j])) continue
-        const a = attrs[i], b = attrs[j]
+        const a = attrs[i],
+          b = attrs[j]
         if (Math.abs(a.lat - b.lat) > maxDeg || Math.abs(a.lon - b.lon) > maxDeg * 2) continue
         const dist = approxMeters(a.lon, a.lat, b.lon, b.lat)
         if (dist <= maxGapMeters) {
           graph.addEdge(nodes[i], nodes[j], {
             distanceMeters: dist,
             isGap: true,
-            geometry: { type: 'LineString', coordinates: [[a.lon, a.lat], [b.lon, b.lat]] },
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [a.lon, a.lat],
+                [b.lon, b.lat],
+              ],
+            },
           })
         }
       }
@@ -83,7 +97,10 @@ export function nearestNode(graph: BikeLaneGraph, lon: number, lat: number): str
   let nearest: string | null = null
   graph.forEachNode((key, a) => {
     const sq = (a.lon - lon) ** 2 + (a.lat - lat) ** 2
-    if (sq < minSq) { minSq = sq; nearest = key }
+    if (sq < minSq) {
+      minSq = sq
+      nearest = key
+    }
   })
   return nearest
 }

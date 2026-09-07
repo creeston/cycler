@@ -28,9 +28,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const DATA_PATH = join(__dirname, '../domain/routing/scenarios/overpass-data.geojson')
 
 // Warsaw Bemowo test coordinates (lon, lat)
-const START_LON = 20.936280
+const START_LON = 20.93628
 const START_LAT = 52.290873
-const END_LON = 20.948600
+const END_LON = 20.9486
 const END_LAT = 52.282443
 
 const BASE_PREFERENCES = {
@@ -131,7 +131,10 @@ describe('routing integration — Warsaw overpass data', () => {
     })
 
     it('route contains only bike_lane and gap segments', () => {
-      expect(hasOnlyValidSegmentTypes(routes[0]), `route ${routes[0].id} has unknown segment type`).toBe(true)
+      expect(
+        hasOnlyValidSegmentTypes(routes[0]),
+        `route ${routes[0].id} has unknown segment type`,
+      ).toBe(true)
     })
 
     it('route has at least one bike_lane segment', () => {

@@ -43,7 +43,12 @@ export function BottomSheet() {
           )}
         </div>
 
-        <Button className="w-full" onClick={() => fetchLanes()} loading={isLoading} disabled={isLoading || isAreaTooLarge}>
+        <Button
+          className="w-full"
+          onClick={() => fetchLanes()}
+          loading={isLoading}
+          disabled={isLoading || isAreaTooLarge}
+        >
           <MapPin size={16} />
           Load Bike Lanes
         </Button>
@@ -52,7 +57,12 @@ export function BottomSheet() {
         )}
 
         {bikeLaneCount > 0 && !currentRoute && (
-          <Button className="w-full" onClick={suggest} loading={isCalculating} disabled={isCalculating}>
+          <Button
+            className="w-full"
+            onClick={suggest}
+            loading={isCalculating}
+            disabled={isCalculating}
+          >
             <Route size={16} />
             Suggest Route
           </Button>
@@ -86,11 +96,7 @@ export function BottomSheet() {
                 <RefreshCw size={15} />
                 New Route
               </Button>
-              <Button
-                variant="ghost"
-                className="flex-1"
-                onClick={() => downloadGpx(currentRoute)}
-              >
+              <Button variant="ghost" className="flex-1" onClick={() => downloadGpx(currentRoute)}>
                 <Download size={15} />
                 Export GPX
               </Button>
@@ -106,9 +112,7 @@ export function BottomSheet() {
           </>
         )}
 
-        {error && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{error}</p>
-        )}
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{error}</p>}
       </div>
     </div>
   )

@@ -9,10 +9,7 @@ function bboxId(bbox: BoundingBox): string {
   return `${bbox.west.toFixed(3)},${bbox.south.toFixed(3)},${bbox.east.toFixed(3)},${bbox.north.toFixed(3)}`
 }
 
-export async function fetchBikeLanes(
-  bbox: BoundingBox,
-  forceRefresh = false,
-): Promise<BikeLane[]> {
+export async function fetchBikeLanes(bbox: BoundingBox, forceRefresh = false): Promise<BikeLane[]> {
   const id = bboxId(bbox)
 
   if (!forceRefresh) {

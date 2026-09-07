@@ -37,11 +37,7 @@ function pickRandom<T>(arr: T[]): T {
  * differ from the walk traversal direction. Reversing when needed ensures that
  * segment geometries always reflect the actual path direction.
  */
-function orientedGeometry(
-  graph: BikeLaneGraph,
-  fromKey: string,
-  attrs: EdgeAttrs,
-): LineString {
+function orientedGeometry(graph: BikeLaneGraph, fromKey: string, attrs: EdgeAttrs): LineString {
   const fromAttrs = graph.getNodeAttributes(fromKey)
   const first = attrs.geometry.coordinates[0]
   if (Math.abs(first[0] - fromAttrs.lon) < 1e-9 && Math.abs(first[1] - fromAttrs.lat) < 1e-9) {
@@ -338,7 +334,7 @@ export function findRoutes(lanes: BikeLane[], preferences: RoutePreferences): Ro
 
   const endKey =
     endLon !== undefined && endLat !== undefined
-      ? nearestNode(graph, endLon, endLat) ?? undefined
+      ? (nearestNode(graph, endLon, endLat) ?? undefined)
       : undefined
 
   const strategy = buildStrategy(preferences, endKey)
@@ -353,7 +349,7 @@ export function findRoutes(lanes: BikeLane[], preferences: RoutePreferences): Ro
 
   // One-way routing uses Dijkstra per start candidate — return only the globally shortest.
   if (endKey && routes.length > 1) {
-    routes = [routes.reduce((a, b) => a.totalDistanceMeters <= b.totalDistanceMeters ? a : b)]
+    routes = [routes.reduce((a, b) => (a.totalDistanceMeters <= b.totalDistanceMeters ? a : b))]
   }
 
   return routes

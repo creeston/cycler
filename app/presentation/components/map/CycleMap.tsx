@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Map, { NavigationControl, GeolocateControl, Marker } from 'react-map-gl/maplibre'
 import type { MapRef, ViewStateChangeEvent } from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { useMapStore } from '~/application/stores/map-store'
 import { BikeLaneLayer } from './BikeLaneLayer'
 import { RouteLayer } from './RouteLayer'
@@ -40,6 +41,7 @@ export function CycleMap() {
       zoom={viewport.zoom}
       style={{ width: '100%', height: '100%' }}
       mapStyle={MAP_STYLE}
+      workerUrl={maplibreWorkerUrl}
       onMove={handleMove}
       onLoad={e => {
         const b = e.target.getBounds()

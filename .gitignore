@@ -1,9 +1,11 @@
 .DS_Store
 .env
 /node_modules/
+/.npm-cache/
 
 # React Router
 /.react-router/
 /build/
+/.vite/
 
 .vscode

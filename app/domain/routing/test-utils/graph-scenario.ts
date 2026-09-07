@@ -49,8 +49,14 @@ export function loadScenario(filePath: string): Scenario {
   const nodeOrder: string[] = []
   const seenNodes = new Set<string>()
   for (const edge of edges) {
-    if (!seenNodes.has(edge.from)) { nodeOrder.push(edge.from); seenNodes.add(edge.from) }
-    if (!seenNodes.has(edge.to)) { nodeOrder.push(edge.to); seenNodes.add(edge.to) }
+    if (!seenNodes.has(edge.from)) {
+      nodeOrder.push(edge.from)
+      seenNodes.add(edge.from)
+    }
+    if (!seenNodes.has(edge.to)) {
+      nodeOrder.push(edge.to)
+      seenNodes.add(edge.to)
+    }
   }
   for (let i = 0; i < nodeOrder.length; i++) {
     graph.mergeNode(nodeOrder[i], { lon: i * 0.001, lat: 0 })
@@ -62,7 +68,13 @@ export function loadScenario(filePath: string): Scenario {
     graph.mergeEdge(edge.from, edge.to, {
       distanceMeters: parseFloat(edge.attrs.distance ?? '0'),
       isGap: edge.attrs.type === 'gap',
-      geometry: { type: 'LineString', coordinates: [[fromLon, 0], [toLon, 0]] },
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [fromLon, 0],
+          [toLon, 0],
+        ],
+      },
     })
   }
 
