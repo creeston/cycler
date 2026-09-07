@@ -1,151 +1,164 @@
 # CycleRoute
 
-A mobile-first single-page application for building bicycle routes based on real OpenStreetMap bike lane data. The defining feature: routes that stay on dedicated cycling infrastructure, tolerating only configurable gaps where lanes are absent.
+A mobile-first single-page application for building bicycle routes on real OpenStreetMap bike
+lane data. The defining idea: routes that stay on dedicated cycling infrastructure, tolerating
+only configurable gaps where lanes are absent.
+
+Urban bike lanes are rarely continuous. A segregated path ends at an intersection, forces you
+onto a car road for 30 metres, then resumes. Most routing apps treat all roads equally.
+CycleRoute treats the presence and continuity of cycling infrastructure as a first-class routing
+constraint.
+
+Client-only: no backend, no accounts, no API keys. Map data is fetched from the Overpass API at
+runtime and cached in the browser.
 
 ---
 
-## Premise
+## Documentation
 
-Urban bike lanes are rarely continuous. A segregated path often ends at an intersection, forces the cyclist onto a car road for 30 metres, then resumes. Most routing apps treat all roads equally. CycleRoute treats the presence and continuity of cycling infrastructure as a first-class routing constraint: you set the maximum gap you'll tolerate, and the app builds a route that respects it.
+| Document | What it covers |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Layers, module map, runtime flows, state and persistence, build pipeline |
+| [docs/algorithms.md](docs/algorithms.md) | Coordinate snapping, distance functions, graph construction, gap bridging, the three routing strategies, complexity, modelling limits |
+| [docs/features.md](docs/features.md) | Features, use cases, the interface, operating limits, scope boundaries |
+| [docs/development.md](docs/development.md) | **Start here to contribute** — where new code goes, TS/React conventions, and the scenario-first workflow for routing algorithms |
+| [backlog/](backlog/README.md) | Pending work — roadmap items, correctness, performance, test coverage |
 
----
-
-## Features
-
-- **Bike-lane-first routing** — routes maximise time on dedicated cycling infrastructure (cycleways, tracks, designated paths). A gap tolerance slider controls how much on-road riding is acceptable between two lane segments.
-- **OSM data on demand** — pan to any city, fetch its bike lane network from the live OpenStreetMap Overpass API with one tap.
-- **Offline caching** — fetched areas are stored in IndexedDB and reused across sessions. Data expires after 7 days; manual refresh is available.
-- **Route metrics** — total distance, bike-lane coverage percentage, gap count.
-- **GPX export** — download the route for any GPS device or app (Komoot, Garmin, etc.).
-- **Minimalistic map** — grey/white vector base map (OpenFreeMap Positron), orange lane overlay (#FC4C02), brighter orange route line.
+> The backlog is worth reading before contributing. Round-trip and point-to-point routing are
+> both fully implemented and tested in the domain layer, and neither is reachable from the UI.
 
 ---
 
-## Architecture
+## Quick start
 
-The project follows a **simplified Clean Architecture** suited to a front-end-only SPA. Three explicit layers prevent business logic from leaking into React components and keep the routing algorithms fully testable in isolation.
-
-```
-app/
-├── domain/              # Pure TypeScript — zero framework dependencies
-│   ├── entities/        # BikeLane, Route, RoutePreferences, CachedArea
-│   ├── routing/         # Graph building, routing algorithms (Dijkstra/A*)
-│   └── mappers/         # GeoJSON <-> domain entity converters
-│
-├── infrastructure/      # Side effects & external systems
-│   ├── osm/             # Overpass API client, QL query builders
-│   ├── cache/           # IndexedDB via `idb`
-│   └── export/          # GPX serialiser
-│
-├── application/         # Orchestration
-│   ├── use-cases/       # FetchBikeLanes, BuildRoute
-│   └── stores/          # Zustand stores (MapStore, RoutingStore)
-│
-└── presentation/        # React — reads stores, dispatches use-cases
-    ├── components/
-    │   ├── map/         # MapLibre GL layers (bike lanes, route)
-    │   ├── layout/      # BottomSheet (mobile panel)
-    │   └── ui/          # Primitive components (Button, etc.)
-    └── hooks/           # useBikeLanes, useRoute — bridge stores to components
-```
-
-**Why not full onion/hexagonal?** The domain is rich enough to warrant isolation (graph algorithms, lane type resolution, gap stitching) but the app has no backend. A strict port/adapter structure would add indirection with no payoff.
-
----
-
-## Technology Decisions
-
-| Challenge | Package | Rationale |
-|---|---|---|
-| OSM data | Overpass API + `osmtogeojson` | CORS-friendly, no key required, best coverage |
-| Map rendering | `maplibre-gl` + `react-map-gl` | GPU-accelerated, open-source Mapbox GL fork, handles large GeoJSON overlays |
-| Map tiles | OpenFreeMap Positron | Free, no API key, clean minimalistic style |
-| Geospatial ops | `@turf/turf` | Canonical JS geospatial toolkit (distance, length, bbox) |
-| Graph / routing | `graphology` + `graphology-shortest-path` | Typed graph library; Dijkstra/bidirectional A* built-in |
-| State management | `zustand` | Minimal boilerplate, slice-friendly, no context nesting |
-| Persistence | `idb` (IndexedDB) | Fully client-side, stores large GeoJSON blobs offline |
-| UI | Tailwind CSS v4 + Radix primitives | No runtime overhead, full component ownership |
-| Icons | `lucide-react` | Lightweight, consistent, tree-shakeable |
-| Testing | `vitest` | Native Vite integration, same API as Jest |
-
----
-
-## Routing Algorithm
-
-### Current (dummy)
-A random walk through available bike lane segments until the target distance is reached. Used to validate the full data pipeline end-to-end.
-
-### Planned
-1. **Graph construction** — nodes are lane endpoints snapped to a ~1 m coordinate grid; edges are lane segments weighted by length. Two nodes within `maxGapMeters` of each other are bridged by a synthetic gap edge.
-2. **A\* routing** — bidirectional A\* with Haversine heuristic finds the shortest path from a random start to an endpoint at approximately the target distance.
-3. **Gap tolerance** — gap edges carry a heavy penalty proportional to gap length. Setting `maxGapMeters = 0` excludes them entirely.
-
----
-
-## Testing Strategy
-
-Tests live next to the code they test (`*.test.ts`). Goal: confidence in domain logic, not coverage metrics.
-
-- **Domain layer** — unit tests for OSM tag resolution, routing helpers (adjacency building, algorithm contract). Pure functions, no mocking.
-- **Use cases** — integration tests with in-memory fakes for the Overpass client and IndexedDB. (Planned)
-- **Presentation** — no component tests initially; behaviour is covered by domain tests. Add when the UI stabilises.
-
-```bash
-npm test                 # run once
-npm run test:watch       # watch mode
-npm run test:coverage    # with coverage report
-```
-
----
-
-## Development
-
-Requires Node.js 24 LTS and npm 11 or newer.
+Requires **Node.js 24** (see `.nvmrc`) and **npm 11+**.
 
 ```bash
 npm ci                   # reproducible install from package-lock.json
 npm run dev              # http://localhost:5173
-npm run typecheck
-npm run lint
-npm run format
-npm test
-npm run check            # run the complete pre-commit verification suite
 ```
 
-### Dependency security
+Pan the map to a city, tap **Load Bike Lanes**, then **Suggest Route**.
 
-The repository-level `.npmrc` quarantines releases younger than three days,
-rejects unreviewed dependency install scripts, blocks git/file/URL dependency
-specifiers, and treats peer-dependency conflicts as errors. The committed
-lockfile provides the exact dependency tree used by `npm ci`.
+---
 
-When updating a dependency, review its source, maintainers, changelog, and the
-`package.json`/`package-lock.json` diff before merging. Then run:
+## Commands
 
 ```bash
-npm run check                # includes npm audit for high/critical findings
-npm run security:signatures  # verify signatures/provenance if the registry supports it
+npm run dev              # dev server with HMR
+npm run build            # production build to build/client
+npm test                 # run the test suite once
+npm run test:watch       # watch mode
+npm run test:coverage    # coverage report
+npm run typecheck        # react-router typegen && tsc
+npm run lint             # eslint
+npm run lint:fix         # eslint --fix
+npm run format           # prettier --write
+npm run check            # the full pre-commit gate (see below)
 ```
 
-If a reviewed dependency genuinely needs an install script, approve that exact
-package and version with `npm approve-scripts`; npm records the decision in the
-root `allowScripts` policy. Do not bypass failures with `--force`,
-`--legacy-peer-deps`, or `--dangerously-allow-all-scripts` without reviewing the
-resulting dependency and lockfile changes.
+`npm run check` runs, in order: `format:check` → `lint` → `typecheck` → `test` → `build` →
+`security:check`. Run it before every commit; it is the same sequence CI should run.
+
+---
+
+## Project layout
+
+```
+app/
+├── domain/           # Pure TypeScript — entities, routing algorithms, mappers. No framework.
+├── infrastructure/   # Overpass client, IndexedDB cache, GPX export
+├── application/      # Use cases and Zustand stores
+├── presentation/     # React components and hooks
+└── integration/      # End-to-end domain tests against real OSM data
+```
+
+Dependencies point inward: `presentation → application → infrastructure → domain`. The domain
+layer imports no framework, which is what makes the routing mathematics testable in isolation.
+Details in [docs/architecture.md](docs/architecture.md).
+
+---
+
+## Testing
+
+Tests live beside the code they cover (`*.test.ts`). Routing is verified with **declarative
+fixtures** rather than hand-built graphs:
+
+- `app/domain/routing/scenarios/geo-to-graph/` — a `.geojson` file plus an `.expected.dot`
+  describing the graph it should produce.
+- `app/domain/routing/scenarios/graph-to-path/` — a `.dot` file carrying both the graph and its
+  assertions as graph attributes, each opening with an ASCII sketch of the network it encodes.
+- `app/integration/` — a real Overpass export of Warsaw Bemowo driven through the full pipeline.
+
+Adding a routing test usually means adding a fixture, not writing code. **Routing algorithms are
+developed scenario-first**: every normal and edge case is expressed as an isolated `.dot` graph
+with explicit expectations *before* the algorithm is written. The full DSL reference, the
+edge-case checklist and the workflow are in
+[docs/development.md §4](docs/development.md). What the fixtures currently prove is summarised in
+[docs/algorithms.md §9](docs/algorithms.md).
+
+Current state: **36 tests, all passing**, all at or below the domain layer. Coverage above that
+line is [task 22](backlog/22-use-case-tests.md).
+
+---
 
 ## Deployment
 
+```bash
+npm run deploy           # build and publish build/client to GitHub Pages
 ```
-npm run deploy           # build and deploy to GitHub Pages
+
+The app is served under the `/cycler/` base path. That value is set in **two** places and they
+must stay in sync — `base` in `vite.config.ts` and `basename` in `react-router.config.ts`.
+
+A Docker image is also committed (multi-stage `node:24-alpine` build → `nginx:stable-alpine`):
+
+```bash
+docker build -t cycleroute .
+docker run -p 8080:80 cycleroute     # http://localhost:8080/cycler/
 ```
 
 ---
 
-## Roadmap
+## Maintenance
 
-- [ ] Real A\* routing with gap-stitching
-- [ ] Gap tolerance slider in the UI
-- [ ] Round-trip route generation
-- [ ] Route preferences (distance range, surface type)
-- [ ] Geocoder address search (Nominatim)
-- [ ] Saved routes list (local)
+### Dependencies
+
+The repository-level `.npmrc` quarantines releases younger than three days, rejects unreviewed
+install scripts, blocks git/file/URL dependency specifiers, pins exact versions, and treats
+peer-dependency conflicts as errors. The committed lockfile provides the exact tree used by
+`npm ci`.
+
+When updating a dependency, review its source, maintainers, changelog, and the
+`package.json` / `package-lock.json` diff before merging. Then:
+
+```bash
+npm run check                # includes npm audit for high/critical findings
+npm run security:signatures  # verify signatures/provenance where the registry supports it
+```
+
+If a reviewed dependency genuinely needs an install script, approve that exact package and
+version with `npm approve-scripts`; npm records the decision in the root `allowScripts` policy.
+Do not bypass failures with `--force`, `--legacy-peer-deps`, or
+`--dangerously-allow-all-scripts` without reviewing the resulting dependency and lockfile changes.
+
+### External services
+
+Both are free, unauthenticated and rate-limited. Treat them as donated infrastructure.
+
+| Service | Used for | Constraint |
+|---|---|---|
+| [Overpass API](https://overpass-api.de) | Bike lane data | Volunteer-run; 429/504 are common under load. Requests are capped at a 50×50 km bbox. See [task 18](backlog/18-overpass-resilience.md). |
+| [OpenFreeMap](https://openfreemap.org) | Positron base tiles | No key, no usage limit stated |
+
+### Cached data
+
+Fetched areas live in IndexedDB (`cycle-app`, store `areas`), keyed by bbox and expiring after
+7 days. Map viewport and the current route live in `localStorage`. Clearing site data resets the
+app completely; nothing is stored anywhere else.
+
+---
+
+## License
+
+[MIT](LICENSE)
