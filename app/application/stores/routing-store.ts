@@ -28,7 +28,7 @@ export const useRoutingStore = create<RoutingStore>()(
     }),
     {
       name: 'cycle-routing',
-      partialize: state => ({ currentRoute: state.currentRoute }),
+      partialize: state => ({ currentRoute: state.currentRoute, preferences: state.preferences }),
     },
   ),
 )

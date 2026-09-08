@@ -173,13 +173,13 @@ their state to `localStorage`.
 | `bbox`, `isLoading`, `fetchError`, `lastFetchedAt` | memory | no | Excluded from `partialize` |
 | `bikeLanes` | IndexedDB (`cycle-app` → `areas`) | yes, on mount | Areas older than 7 days are filtered out but never deleted |
 | `currentRoute` | localStorage (`cycle-routing`) | yes, but degraded | `createdAt` rehydrates as a `string`, not a `Date` — [`15`](../backlog/15-persisted-route-rehydration.md) |
-| `preferences` | memory | no | No UI ever writes to it, so it is always `DEFAULT_PREFERENCES` |
+| `preferences` | localStorage (`cycle-routing`) | yes | Gap tolerance is editable; other values currently use defaults |
 | route batches | module-level `Map` in `build-route.ts` | no | Cleared when new lane data arrives |
 
 The route batch cache is deliberately mutable module state, so **New Route** is instant. It is
-keyed only on `(lon, lat, maxGapMeters)` and ignores `roundTrip`, `endLon`/`endLat` and the
-distance range — harmless today because nothing can change those values, and a bug the moment the
-preferences UI ships ([`14-route-cache-key`](../backlog/14-route-cache-key.md)).
+an LRU bounded to 20 entries and keyed on every routing preference. Start coordinates are rounded
+to three decimal places so close-enough starts can reuse the same batch. Because cached results
+also depend on the lane data, loading new lanes clears the cache explicitly.
 
 ---
 
@@ -224,8 +224,9 @@ interface RoutingStrategy {
 `startProximityMeters` and deduplicates across all of them. Full treatment in
 [algorithms.md §5](algorithms.md).
 
-**Two of these three modes cannot be reached from the running app** — nothing ever calls
-`setPreferences`. See [`04-round-trip-ui`](../backlog/04-round-trip-ui.md) and
+**Two of these three modes cannot be reached from the running app.** The gap-tolerance control
+calls `setPreferences`, but no control sets `roundTrip` or destination coordinates. See
+[`04-round-trip-ui`](../backlog/04-round-trip-ui.md) and
 [`06-destination-picker`](../backlog/06-destination-picker.md).
 
 ---

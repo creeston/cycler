@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { MapPin, Route, Download, RefreshCw, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ChevronDown, MapPin, Route, Download, RefreshCw, X } from 'lucide-react'
 import { Button } from '~/presentation/components/ui/Button'
+import { Slider } from '~/presentation/components/ui/Slider'
 import { useBikeLanes } from '~/presentation/hooks/useBikeLanes'
 import { useRoute } from '~/presentation/hooks/useRoute'
 import { useMapStore } from '~/application/stores/map-store'
@@ -16,6 +17,21 @@ export function BottomSheet() {
   const bikeLaneCount = useMapStore(s => s.bikeLanes.length)
   const fetchError = useMapStore(s => s.fetchError)
   const routeError = useRoutingStore(s => s.routeError)
+  const maxGapMeters = useRoutingStore(s => s.preferences.maxGapMeters)
+  const setPreferences = useRoutingStore(s => s.setPreferences)
+  const [pendingMaxGapMeters, setPendingMaxGapMeters] = useState(maxGapMeters)
+
+  useEffect(() => setPendingMaxGapMeters(maxGapMeters), [maxGapMeters])
+
+  useEffect(() => {
+    if (pendingMaxGapMeters === maxGapMeters) return
+
+    const timeout = window.setTimeout(
+      () => setPreferences({ maxGapMeters: pendingMaxGapMeters }),
+      200,
+    )
+    return () => window.clearTimeout(timeout)
+  }, [maxGapMeters, pendingMaxGapMeters, setPreferences])
 
   const error = fetchError ?? routeError
 
@@ -111,6 +127,29 @@ export function BottomSheet() {
             </div>
           </>
         )}
+
+        <details className="group rounded-xl border border-gray-200 bg-white/70">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 text-sm font-semibold text-gray-700 [&::-webkit-details-marker]:hidden">
+            Preferences
+            <ChevronDown
+              aria-hidden="true"
+              className="transition-transform group-open:rotate-180"
+              size={16}
+            />
+          </summary>
+          <div className="border-t border-gray-100 px-4 py-2">
+            <Slider
+              label="Gap tolerance"
+              valueLabel={`${pendingMaxGapMeters} m`}
+              min={0}
+              max={500}
+              step={25}
+              value={pendingMaxGapMeters}
+              aria-valuetext={`${pendingMaxGapMeters} metres`}
+              onChange={event => setPendingMaxGapMeters(Number(event.currentTarget.value))}
+            />
+          </div>
+        </details>
 
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{error}</p>}
       </div>

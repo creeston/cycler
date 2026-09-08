@@ -60,7 +60,7 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 | Viewport restored between sessions | **Shipped** | `map-store` persist |
 | Round-trip (loop) routing | **Domain only — unreachable** | `roundTripStrategy` · [`04`](../backlog/04-round-trip-ui.md) |
 | Point-to-point routing to a destination | **Domain only — unreachable** | `oneWayStrategy` · [`06`](../backlog/06-destination-picker.md) |
-| Gap tolerance control | **Not started** — fixed at 200 m | [`03`](../backlog/03-gap-tolerance-slider.md) |
+| Gap tolerance control | **Shipped** — persisted 0–500 m slider | `BottomSheet` |
 | Distance range control | **Not started** — fixed at 10–30 km | [`05`](../backlog/05-route-preferences-ui.md) |
 | Surface preference | **Not started** — `surface` parsed, never used | [`05`](../backlog/05-route-preferences-ui.md) |
 | Address search (geocoding) | **Not started** | [`07`](../backlog/07-nominatim-geocoder.md) |
