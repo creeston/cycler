@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown, MapPin, Route, Download, RefreshCw, X } from 'lucide-react'
 import { Button } from '~/presentation/components/ui/Button'
+import { SegmentedControl } from '~/presentation/components/ui/SegmentedControl'
 import { Slider } from '~/presentation/components/ui/Slider'
 import { useBikeLanes } from '~/presentation/hooks/useBikeLanes'
 import { useRoute } from '~/presentation/hooks/useRoute'
 import { useMapStore } from '~/application/stores/map-store'
 import { useRoutingStore } from '~/application/stores/routing-store'
 import { downloadGpx } from '~/infrastructure/export/gpx'
+import { isRoundTrip } from '~/domain/entities/route'
+
+type RouteMode = 'explore' | 'loop'
+
+const ROUTE_MODES: { label: string; value: RouteMode }[] = [
+  { label: 'Explore', value: 'explore' },
+  { label: 'Loop', value: 'loop' },
+]
 
 export function BottomSheet() {
   const [expanded, setExpanded] = useState(true)
@@ -18,6 +27,7 @@ export function BottomSheet() {
   const fetchError = useMapStore(s => s.fetchError)
   const routeError = useRoutingStore(s => s.routeError)
   const maxGapMeters = useRoutingStore(s => s.preferences.maxGapMeters)
+  const roundTrip = useRoutingStore(s => s.preferences.roundTrip)
   const setPreferences = useRoutingStore(s => s.setPreferences)
   const [pendingMaxGapMeters, setPendingMaxGapMeters] = useState(maxGapMeters)
 
@@ -99,6 +109,14 @@ export function BottomSheet() {
                   {Math.round(currentRoute.bikeLaneCoverage * 100)}%
                 </span>
               </div>
+              {isRoundTrip(currentRoute) && (
+                <div className="flex justify-between">
+                  <span>Route type</span>
+                  <span className="rounded-full bg-orange-100 px-2 py-0.5 font-medium text-orange-600">
+                    Loop
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-2">
@@ -137,7 +155,13 @@ export function BottomSheet() {
               size={16}
             />
           </summary>
-          <div className="border-t border-gray-100 px-4 py-2">
+          <div className="space-y-3 border-t border-gray-100 px-4 py-3">
+            <SegmentedControl
+              label="Route mode"
+              options={ROUTE_MODES}
+              value={roundTrip ? 'loop' : 'explore'}
+              onChange={mode => setPreferences({ roundTrip: mode === 'loop' })}
+            />
             <Slider
               label="Gap tolerance"
               valueLabel={`${pendingMaxGapMeters} m`}

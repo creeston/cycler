@@ -86,4 +86,19 @@ describe('buildRoute cache', () => {
     buildRoute(lanes, { ...preferences, minDistanceMeters: 0 })
     expect(findRoutesMock).toHaveBeenCalledTimes(22)
   })
+
+  it('reports a specific error when no loop can be found', () => {
+    findRoutesMock.mockReturnValue([])
+
+    expect(() =>
+      buildRoute(lanes, {
+        ...preferences,
+        endLon: undefined,
+        endLat: undefined,
+        roundTrip: true,
+      }),
+    ).toThrow(
+      'No loop found here. Try a shorter distance, a larger gap tolerance, or Explore mode.',
+    )
+  })
 })

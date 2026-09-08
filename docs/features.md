@@ -58,7 +58,7 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 | GPX export | **Shipped** (minimal) | `downloadGpx` · [`20`](../backlog/20-gpx-hardening.md) |
 | Geolocation marker and fly-to | **Shipped** | `CycleMap` |
 | Viewport restored between sessions | **Shipped** | `map-store` persist |
-| Round-trip (loop) routing | **Domain only — unreachable** | `roundTripStrategy` · [`04`](../backlog/04-round-trip-ui.md) |
+| Round-trip (loop) routing | **Shipped** | `roundTripStrategy`, `BottomSheet` |
 | Point-to-point routing to a destination | **Domain only — unreachable** | `oneWayStrategy` · [`06`](../backlog/06-destination-picker.md) |
 | Gap tolerance control | **Shipped** — persisted 0–500 m slider | `BottomSheet` |
 | Distance range control | **Not started** — fixed at 10–30 km | [`05`](../backlog/05-route-preferences-ui.md) |
@@ -68,10 +68,8 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 | Turn-by-turn navigation | **Out of scope** | — |
 | Elevation profile | **Out of scope** | — |
 
-The three "domain only" rows are the striking ones: `route-finder.ts` implements loop and
-point-to-point routing, both are covered by passing tests, and **neither can be triggered from
-the running app**, because nothing writes to `RoutePreferences` and no UI exposes a destination.
-Wiring them up is small, well-defined work with the algorithms already paid for.
+Point-to-point routing remains implemented and covered by passing domain tests, but cannot be
+triggered from the running app because no UI exposes a destination.
 
 ---
 
@@ -91,6 +89,8 @@ Controls, in full — this is the entire interactive surface of the application:
 | **New Route** | a route exists | Serves the next candidate from the batch |
 | **Export GPX** | a route exists | Downloads `route.gpx` |
 | **✕** | a route exists | Clears the route |
+| Explore / Loop | always | Selects exploratory or closed-loop routing |
+| Gap tolerance | always | Sets the persisted maximum gap from 0–500 m |
 | Zoom in / out | always | MapLibre `NavigationControl` |
 | Locate | always | MapLibre `GeolocateControl`, `maxZoom: 15` |
 | Pan / pinch | always | Updates viewport and bbox; rotation and pitch are disabled |
@@ -165,18 +165,19 @@ alternative mirror, and no way to cancel an in-flight request
 1. A spinner is shown; the hook yields to the browser so it actually paints.
 2. The start point is resolved from `navigator.geolocation` with a 3 s timeout, falling back to
    the map viewport centre. A denied permission is treated as a fallback, not an error.
-3. `buildRoute` looks for a cached batch keyed on `(lon, lat, maxGapMeters)` at ~100 m precision.
-4. On a miss, `findRoutes` builds the graph, runs the explore strategy from every lane endpoint
-   within 200 m of the start, deduplicates, and — if fewer than 3 routes emerged — rebuilds at a
-   1 000 m gap tolerance and retries.
+3. `buildRoute` looks for a cached batch keyed on every routing preference, with start coordinates
+   rounded to three decimal places.
+4. On a miss, `findRoutes` builds the graph, runs the selected Explore or Loop strategy from every
+   lane endpoint within 200 m of the start, deduplicates, and — if too few routes emerged —
+   rebuilds at a 1 000 m gap tolerance and retries.
 5. The batch is shuffled and cached; the first route is returned.
 
 **Result** The route draws in bright orange; distance and coverage appear.
-**Failure** With no route found:
-`No route found in this area. Try fetching a larger area or moving to a zone with more bike lanes.`
+**Failure** Explore mode shows the generic no-route message. Loop mode suggests a shorter
+distance, a larger gap tolerance, or switching back to Explore.
 
-**Current constraints** Always exploratory (never a loop, never to a destination), always
-10–30 km, always 200 m gap tolerance. See [`03`](../backlog/03-gap-tolerance-slider.md)–[`06`](../backlog/06-destination-picker.md).
+**Current constraints** No destination mode, and distance remains fixed at 10–30 km. Gap tolerance
+and Explore/Loop mode are user-selectable and persisted.
 
 ---
 
@@ -185,7 +186,7 @@ alternative mirror, and no way to cancel an in-flight request
 **Actor** Cyclist · **Trigger** Tap *New Route*
 
 The cached batch is advanced by one, wrapping at the end. No recomputation, so the response is
-instant. All routes in a batch share a start point and gap tolerance; because the batch is
+instant. All routes in a batch share every routing preference; because the batch is
 shuffled once at creation, the order is stable within a session.
 
 **Known wrinkle** Mirrored loops count as two distinct entries, so a round-trip batch can present

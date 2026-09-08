@@ -19,6 +19,15 @@ export interface Route {
   createdAt: Date
 }
 
+export function isRoundTrip(route: Route): boolean {
+  if (route.segments.length === 0) return false
+
+  const first = route.segments[0].geometry.coordinates[0]
+  const lastSegment = route.segments[route.segments.length - 1]
+  const last = lastSegment.geometry.coordinates[lastSegment.geometry.coordinates.length - 1]
+  return Math.abs(first[0] - last[0]) < 1e-9 && Math.abs(first[1] - last[1]) < 1e-9
+}
+
 export interface RoutePreferences {
   startLon: number
   startLat: number

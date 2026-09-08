@@ -52,6 +52,12 @@ export function buildRoute(lanes: BikeLane[], preferences: RoutePreferences): Ro
   if (!entry || entry.routes.length === 0) {
     const found = findRoutes(lanes, preferences)
     if (found.length === 0) {
+      const hasDestination = preferences.endLon !== undefined && preferences.endLat !== undefined
+      if (preferences.roundTrip && !hasDestination) {
+        throw new Error(
+          'No loop found here. Try a shorter distance, a larger gap tolerance, or Explore mode.',
+        )
+      }
       throw new Error(
         'No route found in this area. Try fetching a larger area or moving to a zone with more bike lanes.',
       )

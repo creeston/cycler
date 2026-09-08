@@ -21,6 +21,7 @@ import { fileURLToPath } from 'url'
 import type { FeatureCollection } from 'geojson'
 import { geojsonToBikeLanes } from '~/domain/mappers/osm-to-domain'
 import { findRoutes } from '~/domain/routing/route-finder'
+import { isRoundTrip } from '~/domain/entities/route'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 import type { Route } from '~/domain/entities/route'
 
@@ -39,14 +40,6 @@ const BASE_PREFERENCES = {
   maxGapMeters: 200,
   startProximityMeters: 300,
   roundTrip: false,
-}
-
-function isRoundTrip(route: Route): boolean {
-  if (route.segments.length === 0) return false
-  const first = route.segments[0].geometry.coordinates[0]
-  const lastSeg = route.segments[route.segments.length - 1]
-  const last = lastSeg.geometry.coordinates[lastSeg.geometry.coordinates.length - 1]
-  return Math.abs(first[0] - last[0]) < 1e-9 && Math.abs(first[1] - last[1]) < 1e-9
 }
 
 function hasOnlyValidSegmentTypes(route: Route): boolean {

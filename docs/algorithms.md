@@ -543,7 +543,7 @@ Every tuning constant in the routing path, in one place.
 | `R` | 6 371 000 m | `graph.ts` | Earth radius for `approxMeters` |
 | snapping precision | 5 decimals | `algorithms.ts` | ≈ 1.11 m × 0.69 m cell at 52° N |
 | prefilter factor | 1.5 (lat), 3.0 (lon) | `graph.ts` | Bounding-box safety margin |
-| `maxGapMeters` | 200 m | `DEFAULT_PREFERENCES` | User-facing gap tolerance (no UI yet) |
+| `maxGapMeters` | 200 m | `DEFAULT_PREFERENCES` | User-facing gap tolerance; slider range 0–500 m |
 | `startProximityMeters` | 200 m | `DEFAULT_PREFERENCES` | Start candidate radius |
 | `minDistanceMeters` | 10 000 m | `DEFAULT_PREFERENCES` | Target range floor |
 | `maxDistanceMeters` | 30 000 m | `DEFAULT_PREFERENCES` | Target range ceiling |

@@ -224,9 +224,8 @@ interface RoutingStrategy {
 `startProximityMeters` and deduplicates across all of them. Full treatment in
 [algorithms.md §5](algorithms.md).
 
-**Two of these three modes cannot be reached from the running app.** The gap-tolerance control
-calls `setPreferences`, but no control sets `roundTrip` or destination coordinates. See
-[`04-round-trip-ui`](../backlog/04-round-trip-ui.md) and
+**One of these three modes cannot be reached from the running app.** The preferences section
+selects Explore or Loop, but no control sets destination coordinates. See
 [`06-destination-picker`](../backlog/06-destination-picker.md).
 
 ---
@@ -285,7 +284,7 @@ Each is a task in [`/backlog`](../backlog/README.md).
 | Gap edges are unweighted; tolerance is silently widened | The core bike-lane-first guarantee is not enforced | [01](../backlog/01-gap-penalty-and-tolerance.md) |
 | Graph nodes exist only at lane **endpoints** | Lanes meeting mid-way are never connected; the network is more fragmented than reality | [09](../backlog/09-mid-lane-junctions.md) |
 | Gap detection is O(n²) over all nodes | City-scale fetches block the main thread for seconds | [16](../backlog/16-spatial-index.md), [17](../backlog/17-web-worker.md) |
-| `preferences` has no UI and is never persisted | Round-trip, one-way and distance range are unreachable domain code | [03](../backlog/03-gap-tolerance-slider.md), [04](../backlog/04-round-trip-ui.md), [05](../backlog/05-route-preferences-ui.md), [06](../backlog/06-destination-picker.md) |
+| Destination and distance preferences have no UI | One-way routing and distance configuration are unreachable | [05](../backlog/05-route-preferences-ui.md), [06](../backlog/06-destination-picker.md) |
 | Overpass has one endpoint, no retry, no abort | A 429 or 504 surfaces as a raw error and loses the request | [18](../backlog/18-overpass-resilience.md) |
 | IndexedDB cache is bypassed on every fetch | Every button press re-queries Overpass | [19](../backlog/19-cache-bypassed-on-fetch.md) |
 | No tests above the domain layer | Use cases, stores, hooks and infrastructure are unverified | [22](../backlog/22-use-case-tests.md) |
