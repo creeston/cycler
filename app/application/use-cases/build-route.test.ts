@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 import type { Route, RoutePreferences } from '~/domain/entities/route'
 import { findRoutes } from '~/domain/routing/route-finder'
-import { buildRoute, clearRouteCache } from './build-route'
+import { buildRoute, clearRouteCache, DestinationRouteOutsideRangeError } from './build-route'
 
 vi.mock('~/domain/routing/route-finder', () => ({
   findRoutes: vi.fn(),
@@ -34,11 +34,11 @@ const changedPreferenceValues = {
   roundTrip: true,
 } satisfies Required<RoutePreferences>
 
-function route(id: string): Route {
+function route(id: string, totalDistanceMeters = 0): Route {
   return {
     id,
     segments: [],
-    totalDistanceMeters: 0,
+    totalDistanceMeters,
     bikeLaneDistanceMeters: 0,
     bikeLaneCoverage: 0,
     gapCount: 0,
@@ -100,5 +100,37 @@ describe('buildRoute cache', () => {
     ).toThrow(
       'No loop found here. Try a shorter distance, a larger gap tolerance, or Explore mode.',
     )
+  })
+
+  it('distinguishes a disconnected destination', () => {
+    findRoutesMock.mockReturnValue([])
+
+    expect(() => buildRoute(lanes, preferences)).toThrow(
+      'No connected bike route to that point. Try increasing gap tolerance or loading a larger area.',
+    )
+    expect(findRoutesMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports the actual distance and retains a reachable route below the range', () => {
+    const shortRoute = route('short', 3_200)
+    findRoutesMock.mockReturnValueOnce([]).mockReturnValueOnce([shortRoute])
+
+    let error: unknown
+    try {
+      buildRoute(lanes, { ...preferences, minDistanceMeters: 10_000 })
+    } catch (caught) {
+      error = caught
+    }
+
+    expect(error).toBeInstanceOf(DestinationRouteOutsideRangeError)
+    expect(error).toMatchObject({
+      message: 'The route there is only 3.2 km, below your 10 km minimum.',
+      route: shortRoute,
+    })
+    expect(findRoutesMock).toHaveBeenLastCalledWith(lanes, {
+      ...preferences,
+      minDistanceMeters: 0,
+      maxDistanceMeters: Number.MAX_SAFE_INTEGER,
+    })
   })
 })

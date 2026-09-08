@@ -12,6 +12,21 @@ const MAX_CACHE_ENTRIES = 20
 // Entries also depend on the lane data. Callers must use clearRouteCache() whenever lanes change.
 const cache = new Map<string, CacheEntry>()
 
+function formatKilometers(meters: number): string {
+  const kilometers = meters / 1_000
+  return `${Number.isInteger(kilometers) ? kilometers.toFixed(0) : kilometers.toFixed(1)} km`
+}
+
+export class DestinationRouteOutsideRangeError extends Error {
+  constructor(
+    message: string,
+    readonly route: Route,
+  ) {
+    super(message)
+    this.name = 'DestinationRouteOutsideRangeError'
+  }
+}
+
 function cacheKey(preferences: RoutePreferences): string {
   // ~100 m precision on start point — close-enough starts reuse the same batch
   return JSON.stringify({
@@ -53,6 +68,24 @@ export function buildRoute(lanes: BikeLane[], preferences: RoutePreferences): Ro
     const found = findRoutes(lanes, preferences)
     if (found.length === 0) {
       const hasDestination = preferences.endLon !== undefined && preferences.endLat !== undefined
+      if (hasDestination) {
+        const [unrestrictedRoute] = findRoutes(lanes, {
+          ...preferences,
+          minDistanceMeters: 0,
+          maxDistanceMeters: Number.MAX_SAFE_INTEGER,
+        })
+        if (unrestrictedRoute) {
+          const distance = formatKilometers(unrestrictedRoute.totalDistanceMeters)
+          const message =
+            unrestrictedRoute.totalDistanceMeters < preferences.minDistanceMeters
+              ? `The route there is only ${distance}, below your ${formatKilometers(preferences.minDistanceMeters)} minimum.`
+              : `The shortest route there is ${distance}, above your ${formatKilometers(preferences.maxDistanceMeters)} maximum.`
+          throw new DestinationRouteOutsideRangeError(message, unrestrictedRoute)
+        }
+        throw new Error(
+          'No connected bike route to that point. Try increasing gap tolerance or loading a larger area.',
+        )
+      }
       if (preferences.roundTrip && !hasDestination) {
         throw new Error(
           'No loop found here. Try a shorter distance, a larger gap tolerance, or Explore mode.',

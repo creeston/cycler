@@ -10,25 +10,39 @@ import { useRoutingStore } from '~/application/stores/routing-store'
 import { downloadGpx } from '~/infrastructure/export/gpx'
 import { isRoundTrip } from '~/domain/entities/route'
 
-type RouteMode = 'explore' | 'loop'
+type RouteMode = 'explore' | 'loop' | 'destination'
 
 const ROUTE_MODES: { label: string; value: RouteMode }[] = [
   { label: 'Explore', value: 'explore' },
   { label: 'Loop', value: 'loop' },
+  { label: 'To destination', value: 'destination' },
 ]
 
 export function BottomSheet() {
   const [expanded, setExpanded] = useState(true)
 
   const { fetch: fetchLanes, isLoading, lastFetchedAt, isAreaTooLarge } = useBikeLanes()
-  const { suggest, clear, currentRoute, isCalculating } = useRoute()
+  const {
+    suggest,
+    clear,
+    currentRoute,
+    isCalculating,
+    canIgnoreDistanceRange,
+    ignoreDistanceRange,
+  } = useRoute()
 
   const bikeLaneCount = useMapStore(s => s.bikeLanes.length)
   const fetchError = useMapStore(s => s.fetchError)
   const routeError = useRoutingStore(s => s.routeError)
   const maxGapMeters = useRoutingStore(s => s.preferences.maxGapMeters)
   const roundTrip = useRoutingStore(s => s.preferences.roundTrip)
+  const endLon = useRoutingStore(s => s.preferences.endLon)
+  const endLat = useRoutingStore(s => s.preferences.endLat)
+  const isChoosingDestination = useRoutingStore(s => s.isChoosingDestination)
   const setPreferences = useRoutingStore(s => s.setPreferences)
+  const setChoosingDestination = useRoutingStore(s => s.setChoosingDestination)
+  const setRoute = useRoutingStore(s => s.setRoute)
+  const setRouteError = useRoutingStore(s => s.setRouteError)
   const [pendingMaxGapMeters, setPendingMaxGapMeters] = useState(maxGapMeters)
 
   useEffect(() => setPendingMaxGapMeters(maxGapMeters), [maxGapMeters])
@@ -44,6 +58,25 @@ export function BottomSheet() {
   }, [maxGapMeters, pendingMaxGapMeters, setPreferences])
 
   const error = fetchError ?? routeError
+  const hasDestination = endLon !== undefined && endLat !== undefined
+  const routeMode: RouteMode =
+    hasDestination || isChoosingDestination ? 'destination' : roundTrip ? 'loop' : 'explore'
+
+  function selectRouteMode(mode: RouteMode): void {
+    setRoute(null)
+    setRouteError(null)
+    if (mode === 'destination') {
+      setPreferences({ endLon: undefined, endLat: undefined, roundTrip: false })
+      setChoosingDestination(true)
+      return
+    }
+    setChoosingDestination(false)
+    setPreferences({
+      endLon: undefined,
+      endLat: undefined,
+      roundTrip: mode === 'loop',
+    })
+  }
 
   return (
     <div
@@ -159,9 +192,23 @@ export function BottomSheet() {
             <SegmentedControl
               label="Route mode"
               options={ROUTE_MODES}
-              value={roundTrip ? 'loop' : 'explore'}
-              onChange={mode => setPreferences({ roundTrip: mode === 'loop' })}
+              value={routeMode}
+              onChange={selectRouteMode}
             />
+            {isChoosingDestination && (
+              <p className="text-center text-xs text-orange-600">
+                Tap the map to choose a destination
+              </p>
+            )}
+            {hasDestination && (
+              <Button
+                variant="ghost"
+                className="w-full py-2"
+                onClick={() => selectRouteMode('explore')}
+              >
+                Clear destination
+              </Button>
+            )}
             <Slider
               label="Gap tolerance"
               valueLabel={`${pendingMaxGapMeters} m`}
@@ -176,6 +223,11 @@ export function BottomSheet() {
         </details>
 
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{error}</p>}
+        {canIgnoreDistanceRange && routeError && (
+          <Button variant="ghost" className="w-full" onClick={ignoreDistanceRange}>
+            Ignore distance range
+          </Button>
+        )}
       </div>
     </div>
   )

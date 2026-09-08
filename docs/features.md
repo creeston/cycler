@@ -59,7 +59,7 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 | Geolocation marker and fly-to | **Shipped** | `CycleMap` |
 | Viewport restored between sessions | **Shipped** | `map-store` persist |
 | Round-trip (loop) routing | **Shipped** | `roundTripStrategy`, `BottomSheet` |
-| Point-to-point routing to a destination | **Domain only — unreachable** | `oneWayStrategy` · [`06`](../backlog/06-destination-picker.md) |
+| Point-to-point routing to a destination | **Shipped** | `oneWayStrategy`, `CycleMap` |
 | Gap tolerance control | **Shipped** — persisted 0–500 m slider | `BottomSheet` |
 | Distance range control | **Not started** — fixed at 10–30 km | [`05`](../backlog/05-route-preferences-ui.md) |
 | Surface preference | **Not started** — `surface` parsed, never used | [`05`](../backlog/05-route-preferences-ui.md) |
@@ -68,8 +68,8 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 | Turn-by-turn navigation | **Out of scope** | — |
 | Elevation profile | **Out of scope** | — |
 
-Point-to-point routing remains implemented and covered by passing domain tests, but cannot be
-triggered from the running app because no UI exposes a destination.
+All three routing strategies are reachable from the preferences section. A destination can be
+chosen with map-pick mode, a touch long-press, or a desktop right-click.
 
 ---
 
@@ -89,8 +89,10 @@ Controls, in full — this is the entire interactive surface of the application:
 | **New Route** | a route exists | Serves the next candidate from the batch |
 | **Export GPX** | a route exists | Downloads `route.gpx` |
 | **✕** | a route exists | Clears the route |
-| Explore / Loop | always | Selects exploratory or closed-loop routing |
+| Explore / Loop / To destination | always | Selects the routing mode |
 | Gap tolerance | always | Sets the persisted maximum gap from 0–500 m |
+| Map tap | destination-picking mode | Sets the destination |
+| Map long-press / right-click | always | Sets the destination directly |
 | Zoom in / out | always | MapLibre `NavigationControl` |
 | Locate | always | MapLibre `GeolocateControl`, `maxZoom: 15` |
 | Pan / pinch | always | Updates viewport and bbox; rotation and pitch are disabled |
@@ -167,17 +169,19 @@ alternative mirror, and no way to cancel an in-flight request
    the map viewport centre. A denied permission is treated as a fallback, not an error.
 3. `buildRoute` looks for a cached batch keyed on every routing preference, with start coordinates
    rounded to three decimal places.
-4. On a miss, `findRoutes` builds the graph, runs the selected Explore or Loop strategy from every
-   lane endpoint within 200 m of the start, deduplicates, and — if too few routes emerged —
-   rebuilds at a 1 000 m gap tolerance and retries.
+4. On a miss, `findRoutes` builds the graph, runs the selected Explore, Loop, or one-way strategy
+   from every lane endpoint within 200 m of the start, deduplicates, and — if too few routes
+   emerged — rebuilds at a 1 000 m gap tolerance and retries.
 5. The batch is shuffled and cached; the first route is returned.
 
 **Result** The route draws in bright orange; distance and coverage appear.
 **Failure** Explore mode shows the generic no-route message. Loop mode suggests a shorter
-distance, a larger gap tolerance, or switching back to Explore.
+distance, a larger gap tolerance, or switching back to Explore. Destination mode distinguishes a
+disconnected graph from a reachable route outside the distance range; the latter can be accepted
+with **Ignore distance range**.
 
-**Current constraints** No destination mode, and distance remains fixed at 10–30 km. Gap tolerance
-and Explore/Loop mode are user-selectable and persisted.
+**Current constraints** Distance remains fixed at 10–30 km. Gap tolerance and routing mode are
+user-selectable and persisted.
 
 ---
 

@@ -1,7 +1,8 @@
-import { useCallback } from 'react'
-import { buildRoute } from '~/application/use-cases/build-route'
+import { useCallback, useEffect, useState } from 'react'
+import { buildRoute, DestinationRouteOutsideRangeError } from '~/application/use-cases/build-route'
 import { useMapStore } from '~/application/stores/map-store'
 import { useRoutingStore } from '~/application/stores/routing-store'
+import type { Route } from '~/domain/entities/route'
 
 async function resolveStartPoint(
   fallbackLon: number,
@@ -20,13 +21,21 @@ async function resolveStartPoint(
 export function useRoute() {
   const bikeLanes = useMapStore(s => s.bikeLanes)
   const viewport = useMapStore(s => s.viewport)
-  const { currentRoute, preferences, isCalculating, setRoute, setCalculating, setRouteError } =
-    useRoutingStore()
+  const currentRoute = useRoutingStore(s => s.currentRoute)
+  const preferences = useRoutingStore(s => s.preferences)
+  const isCalculating = useRoutingStore(s => s.isCalculating)
+  const setRoute = useRoutingStore(s => s.setRoute)
+  const setCalculating = useRoutingStore(s => s.setCalculating)
+  const setRouteError = useRoutingStore(s => s.setRouteError)
+  const [outsideRangeRoute, setOutsideRangeRoute] = useState<Route | null>(null)
+
+  useEffect(() => setOutsideRangeRoute(null), [preferences])
 
   const suggest = useCallback(async () => {
     if (bikeLanes.length === 0 || isCalculating) return
     setCalculating(true)
     setRouteError(null)
+    setOutsideRangeRoute(null)
     // Yield to React so the loading spinner renders before the synchronous graph work begins
     await new Promise(resolve => setTimeout(resolve, 0))
     try {
@@ -34,6 +43,7 @@ export function useRoute() {
       const route = buildRoute(bikeLanes, { ...preferences, startLon, startLat })
       setRoute(route)
     } catch (err) {
+      if (err instanceof DestinationRouteOutsideRangeError) setOutsideRangeRoute(err.route)
       setRouteError(err instanceof Error ? err.message : 'Failed to build route')
     } finally {
       setCalculating(false)
@@ -42,5 +52,20 @@ export function useRoute() {
 
   const clear = useCallback(() => setRoute(null), [setRoute])
 
-  return { suggest, clear, currentRoute, isCalculating, preferences }
+  const ignoreDistanceRange = useCallback(() => {
+    if (!outsideRangeRoute) return
+    setRoute(outsideRangeRoute)
+    setRouteError(null)
+    setOutsideRangeRoute(null)
+  }, [outsideRangeRoute, setRoute, setRouteError])
+
+  return {
+    suggest,
+    clear,
+    currentRoute,
+    isCalculating,
+    preferences,
+    canIgnoreDistanceRange: outsideRangeRoute !== null,
+    ignoreDistanceRange,
+  }
 }

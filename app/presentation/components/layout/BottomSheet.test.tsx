@@ -19,6 +19,7 @@ beforeEach(() => {
   localStorage.clear()
   useRoutingStore.setState({
     currentRoute: null,
+    isChoosingDestination: false,
     preferences: { ...DEFAULT_PREFERENCES },
     routeError: null,
   })
@@ -93,5 +94,27 @@ describe('BottomSheet preferences', () => {
 
     expect(screen.getByText('Route type')).toBeInTheDocument()
     expect(screen.getByText('Loop', { selector: 'span' })).toBeInTheDocument()
+  })
+
+  it('enters destination-picking mode and clears destination coordinates when leaving it', () => {
+    render(<BottomSheet />)
+    fireEvent.click(screen.getByText('Preferences'))
+    fireEvent.click(screen.getByRole('radio', { name: 'To destination' }))
+
+    expect(useRoutingStore.getState().isChoosingDestination).toBe(true)
+    expect(useRoutingStore.getState().preferences.roundTrip).toBe(false)
+    expect(screen.getByText('Tap the map to choose a destination')).toBeInTheDocument()
+
+    act(() => {
+      useRoutingStore.setState(state => ({
+        isChoosingDestination: false,
+        preferences: { ...state.preferences, endLon: 21.1, endLat: 52.1 },
+      }))
+    })
+    fireEvent.click(screen.getByText('Clear destination'))
+
+    expect(useRoutingStore.getState().preferences.endLon).toBeUndefined()
+    expect(useRoutingStore.getState().preferences.endLat).toBeUndefined()
+    expect(screen.getByRole('radio', { name: 'Explore' })).toHaveAttribute('aria-checked', 'true')
   })
 })

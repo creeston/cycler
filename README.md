@@ -24,8 +24,8 @@ runtime and cached in the browser.
 | [docs/development.md](docs/development.md) | **Start here to contribute** — where new code goes, TS/React conventions, and the scenario-first workflow for routing algorithms |
 | [backlog/](backlog/README.md) | Pending work — roadmap items, correctness, performance, test coverage |
 
-> The backlog is worth reading before contributing. Round-trip and point-to-point routing are
-> both fully implemented and tested in the domain layer, and neither is reachable from the UI.
+> The backlog is worth reading before contributing. Explore, round-trip and point-to-point
+> routing are implemented, tested and reachable from the preferences UI.
 
 ---
 
