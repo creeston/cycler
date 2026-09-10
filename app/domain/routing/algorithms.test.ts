@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { coordKey } from './algorithms'
-import { BARRIER_COST_MULTIPLIER, buildGraph, getGapStats, nearestNode } from './graph'
+import {
+  BARRIER_COST_MULTIPLIER,
+  GAP_PENALTY_FACTOR,
+  buildGraph,
+  gapPenaltyFactor,
+  getGapStats,
+  getMaxGapMeters,
+  nearestNode,
+} from './graph'
 import { geojsonToBarriers } from '../mappers/osm-to-barriers'
 import type { BikeLane } from '../entities/bike-lane'
 import type { BikeLaneGraph } from './graph'
@@ -160,6 +168,47 @@ describe('buildGraph gap pruning', () => {
   })
 })
 
+// ── gap pricing ──────────────────────────────────────────────
+
+describe('gap pricing', () => {
+  it('charges a lane edge its real length', () => {
+    const g = buildGraph(severedLanes(), 200)
+    const lane = g.edge(coordKey(0.0005, 0), coordKey(-0.002, 0))
+
+    expect(g.getEdgeAttribute(lane, 'costMeters')).toBe(g.getEdgeAttribute(lane, 'distanceMeters'))
+  })
+
+  it('charges a gap edge its length times the penalty', () => {
+    const g = buildGraph(severedLanes(), 200)
+    const gap = g.edge(coordKey(0.0005, 0), coordKey(0.0015, 0))
+    const distanceMeters = g.getEdgeAttribute(gap, 'distanceMeters')
+
+    expect(g.getEdgeAttribute(gap, 'costMeters')).toBeCloseTo(
+      distanceMeters * gapPenaltyFactor(distanceMeters, 200),
+    )
+    expect(g.getEdgeAttribute(gap, 'costMeters')).toBeGreaterThan(distanceMeters * 5)
+  })
+
+  it('records the tolerance the graph was built with', () => {
+    expect(getMaxGapMeters(buildGraph(severedLanes(), 200))).toBe(200)
+  })
+
+  it('prices a gap at the base factor when it is vanishingly short', () => {
+    expect(gapPenaltyFactor(0, 200)).toBe(GAP_PENALTY_FACTOR)
+  })
+
+  it('doubles the base factor for a gap at the full tolerance', () => {
+    expect(gapPenaltyFactor(200, 200)).toBe(GAP_PENALTY_FACTOR * 2)
+  })
+
+  it('grows with gap length, so one long gap costs more than two short ones', () => {
+    const long = 100 * gapPenaltyFactor(100, 200)
+    const short = 2 * (50 * gapPenaltyFactor(50, 200))
+
+    expect(long).toBeGreaterThan(short)
+  })
+})
+
 // ── barrier veto ─────────────────────────────────────────────
 
 describe('buildGraph barrier veto', () => {
@@ -202,8 +251,9 @@ describe('buildGraph barrier veto', () => {
 
     expect(edge, 'the gap edge is marked, not dropped').toBeDefined()
     expect(g.getEdgeAttribute(edge, 'barrier')).toBe('major_road')
+    const distanceMeters = g.getEdgeAttribute(edge, 'distanceMeters')
     expect(g.getEdgeAttribute(edge, 'costMeters')).toBeCloseTo(
-      g.getEdgeAttribute(edge, 'distanceMeters') * BARRIER_COST_MULTIPLIER,
+      distanceMeters * gapPenaltyFactor(distanceMeters, 200) * BARRIER_COST_MULTIPLIER,
     )
     expect(getGapStats(g)).toMatchObject({ kept: 1, barrierCrossings: 1, barriersChecked: true })
   })

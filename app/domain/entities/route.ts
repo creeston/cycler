@@ -27,7 +27,28 @@ export interface Route {
    * unchecked, which is the honest default.
    */
   barriersChecked: boolean
+  /** The gap tolerance the rider asked for, in metres. */
+  requestedGapMeters: number
+  /**
+   * The gap tolerance this route was actually built with. Larger than
+   * requestedGapMeters when the fallback widened it to find anything at all —
+   * `wasGapToleranceWidened` is how the UI asks.
+   */
+  appliedGapMeters: number
   createdAt: Date
+}
+
+export function wasGapToleranceWidened(route: Route): boolean {
+  return route.appliedGapMeters > route.requestedGapMeters
+}
+
+/** The longest gap segment on a route, or 0 when it has none. */
+export function longestGapMeters(route: Route): number {
+  return route.segments.reduce(
+    (longest, segment) =>
+      segment.type === 'gap' ? Math.max(longest, segment.distanceMeters) : longest,
+    0,
+  )
 }
 
 export function isRoundTrip(route: Route): boolean {

@@ -88,6 +88,8 @@ describe('BottomSheet preferences', () => {
       gapCount: 0,
       barrierCrossingCount: 0,
       barriersChecked: true,
+      requestedGapMeters: 200,
+      appliedGapMeters: 200,
       createdAt: new Date(0),
     }
     useRoutingStore.setState({ currentRoute: loop })
@@ -124,6 +126,26 @@ describe('BottomSheet preferences', () => {
 
     expect(screen.getByText('not checked')).toBeInTheDocument()
     expect(screen.getByText(/Barrier data was unavailable/)).toBeInTheDocument()
+  })
+
+  it('says when the gap tolerance had to be widened to find the route', () => {
+    const route = routeWithCrossings(0, true)
+    useRoutingStore.setState({
+      currentRoute: { ...route, requestedGapMeters: 100, appliedGapMeters: 1_000 },
+    })
+
+    render(<BottomSheet />)
+
+    expect(screen.getByText(/No route fit your 100 m gap tolerance/)).toBeInTheDocument()
+    expect(screen.getByText(/widened to 1 km/)).toBeInTheDocument()
+  })
+
+  it('says nothing about tolerance when the request was met', () => {
+    useRoutingStore.setState({ currentRoute: routeWithCrossings(0, true) })
+
+    render(<BottomSheet />)
+
+    expect(screen.queryByText(/gap tolerance/)).not.toBeInTheDocument()
   })
 
   it('enters destination-picking mode and clears destination coordinates when leaving it', () => {
@@ -171,6 +193,8 @@ function routeWithCrossings(barrierCrossingCount: number, barriersChecked: boole
     gapCount: 0,
     barrierCrossingCount,
     barriersChecked,
+    requestedGapMeters: 200,
+    appliedGapMeters: 200,
     createdAt: new Date(0),
   }
 }

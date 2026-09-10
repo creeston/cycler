@@ -28,10 +28,12 @@ between two lane segments, and the router works within that budget.
 > them and tells the rider when it could not. Lanes on different levels are no longer bridged at
 > all.
 >
-> One step is left: a surviving gap still costs plain length, so a 200 m detour through a
-> residential street weighs the same as 200 m of protected path
-> ([`01`](../backlog/01-gap-penalty-and-tolerance.md)). Until that lands, `bikeLaneCoverage` is a
-> lane-maximisation score with a crossing warning attached, not a safety rating.
+> [`01`](../backlog/01-gap-penalty-and-tolerance.md) closed the last step: a gap now costs the
+> router 5–10× its length, so it prefers lanes because the cost function says so, and a route
+> either respects the rider's gap tolerance or states on its face that it was widened. What
+> `bikeLaneCoverage` still cannot tell you is how unpleasant the remaining gaps are — one number
+> prices a quiet street and a four-lane road alike. Level of Traffic Stress is the model that
+> would fix that, and it is not built.
 
 ---
 

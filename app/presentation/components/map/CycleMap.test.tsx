@@ -158,6 +158,8 @@ describe('CycleMap destination selection', () => {
       gapCount: 0,
       barrierCrossingCount: 0,
       barriersChecked: true,
+      requestedGapMeters: 200,
+      appliedGapMeters: 200,
       createdAt: new Date(0),
     }
     useRoutingStore.setState(state => ({
@@ -194,6 +196,8 @@ describe('CycleMap destination selection', () => {
       gapCount: 0,
       barrierCrossingCount: 0,
       barriersChecked: true,
+      requestedGapMeters: 200,
+      appliedGapMeters: 200,
       createdAt: new Date(0),
     }
     useRoutingStore.setState({ currentRoute: route })

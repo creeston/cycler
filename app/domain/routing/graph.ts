@@ -44,6 +44,8 @@ export interface GapStats {
 
 export interface GraphAttrs {
   gapStats?: GapStats
+  /** The gap tolerance this graph was built with. */
+  maxGapMeters?: number
 }
 
 export type BikeLaneGraph = Graph<NodeAttrs, EdgeAttrs, GraphAttrs>
@@ -78,6 +80,27 @@ const EMPTY_GAP_STATS: GapStats = {
  * real data is understood.
  */
 export const BARRIER_COST_MULTIPLIER = 50
+
+/**
+ * What a metre off bike infrastructure costs, as a multiple of a metre on it.
+ *
+ * The product's premise is that riders accept a detour to stay on a lane, and
+ * this is where that is stated: at 5, the router trades up to 5 m of cycleway
+ * for every 1 m of road it avoids. Chosen by measuring route quality on the
+ * Warsaw fixture — see docs/algorithms.md §3.3.5.
+ */
+export const GAP_PENALTY_FACTOR = 5
+
+/**
+ * The cost premium on a gap, as a multiple of its length. Grows with length
+ * relative to the tolerance, so one long gap costs more than the same distance
+ * split into several short ones — which is how the discomfort actually scales.
+ * A gap at the full tolerance costs twice the base factor.
+ */
+export function gapPenaltyFactor(distanceMeters: number, maxGapMeters: number): number {
+  if (maxGapMeters <= 0) return GAP_PENALTY_FACTOR
+  return GAP_PENALTY_FACTOR * (1 + distanceMeters / maxGapMeters)
+}
 
 interface GapCandidate {
   from: number
@@ -272,6 +295,7 @@ function addGapEdges(
   maxGapsPerNode: number,
   levels: Map<string, Set<number>>,
   barriers: BarrierData | undefined,
+  gapPenalty: (distanceMeters: number, maxGapMeters: number) => number,
 ): GapStats {
   const nodes = graph.nodes()
   // Pre-compute to avoid repeated attribute lookups in the inner loop
@@ -294,9 +318,12 @@ function addGapEdges(
     const barrier = index ? findBlockingBarrier(index, a.lon, a.lat, b.lon, b.lat) : null
     if (barrier) barrierCrossings++
 
+    const penalty =
+      gapPenalty(c.distanceMeters, maxGapMeters) * (barrier ? BARRIER_COST_MULTIPLIER : 1)
+
     graph.addEdge(nodes[c.from], nodes[c.to], {
       distanceMeters: c.distanceMeters,
-      costMeters: barrier ? c.distanceMeters * BARRIER_COST_MULTIPLIER : c.distanceMeters,
+      costMeters: c.distanceMeters * penalty,
       isGap: true,
       ...(barrier ? { barrier } : {}),
       geometry: {
@@ -332,6 +359,11 @@ export interface GraphOptions {
    * and `gapStats.barriersChecked` says so.
    */
   barriers?: BarrierData
+  /**
+   * Cost premium on a gap, as a multiple of its length. Exposed so alternative
+   * penalty models can be measured; production uses gapPenaltyFactor.
+   */
+  gapPenalty?: (distanceMeters: number, maxGapMeters: number) => number
 }
 
 /**
@@ -341,8 +373,9 @@ export interface GraphOptions {
  * the ones that are not worth having: pairs on different levels are dropped
  * (they pass over or under each other), the rest are pruned by selectGapEdges,
  * and survivors that cross a barrier away from a crossing are marked and made
- * expensive rather than removed. Counts are stored as the graph attribute
- * `gapStats` and read with getGapStats.
+ * expensive rather than removed. Every gap edge costs more to the router than
+ * its length (gapPenaltyFactor); `distanceMeters` stays the real distance.
+ * Counts are stored as the graph attribute `gapStats` and read with getGapStats.
  */
 export function buildGraph(
   lanes: BikeLane[],
@@ -361,11 +394,18 @@ export function buildGraph(
           options.maxGapsPerNode ?? MAX_GAP_EDGES_PER_NODE,
           levels,
           options.barriers,
+          options.gapPenalty ?? gapPenaltyFactor,
         )
       : EMPTY_GAP_STATS
   graph.setAttribute('gapStats', stats)
+  graph.setAttribute('maxGapMeters', maxGapMeters)
 
   return graph
+}
+
+/** The gap tolerance a graph was built with; 0 for graphs not built by buildGraph. */
+export function getMaxGapMeters(graph: BikeLaneGraph): number {
+  return graph.getAttribute('maxGapMeters') ?? 0
 }
 
 /** Gap pruning counts for a graph, all zero for graphs not built by buildGraph. */

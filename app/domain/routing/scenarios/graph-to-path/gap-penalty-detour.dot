@@ -1,0 +1,23 @@
+// One-way from A to D. The direct way is 200 m and includes a 60 m gap; the
+// all-lane way round is 240 m. Distance alone would take the gap; the gap
+// penalty prices those 60 m at 5-10x, so the longer clean route wins.
+//
+//   A --70m lane-- B ~~60m gap~~ C --70m lane-- D          = 200 m
+//   A --120m lane-- E --120m lane-- D                      = 240 m
+//
+graph gap_penalty_detour {
+  graph [
+    description = "The cheaper route by distance loses to the all-lane route once gaps are priced",
+    start = "A",
+    end = "D",
+    minDist = 0,
+    maxDist = 5000,
+    expect_route = "A,E,D"
+  ]
+
+  A -- B [distance=70, type=lane]
+  B -- C [distance=60, type=gap]
+  C -- D [distance=70, type=lane]
+  A -- E [distance=120, type=lane]
+  E -- D [distance=120, type=lane]
+}

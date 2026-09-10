@@ -44,6 +44,8 @@ function route(id: string, totalDistanceMeters = 0): Route {
     gapCount: 0,
     barrierCrossingCount: 0,
     barriersChecked: true,
+    requestedGapMeters: 200,
+    appliedGapMeters: 200,
     createdAt: new Date(0),
   }
 }

@@ -8,7 +8,7 @@ import { useRoute } from '~/presentation/hooks/useRoute'
 import { useMapStore } from '~/application/stores/map-store'
 import { useRoutingStore } from '~/application/stores/routing-store'
 import { downloadGpx } from '~/infrastructure/export/gpx'
-import { isRoundTrip } from '~/domain/entities/route'
+import { isRoundTrip, wasGapToleranceWidened } from '~/domain/entities/route'
 import type { Route as CycleRoute } from '~/domain/entities/route'
 
 type RouteMode = 'explore' | 'loop' | 'destination'
@@ -18,6 +18,12 @@ const ROUTE_MODES: { label: string; value: RouteMode }[] = [
   { label: 'Loop', value: 'loop' },
   { label: 'To destination', value: 'destination' },
 ]
+
+function formatMeters(meters: number): string {
+  return meters >= 1_000
+    ? `${(meters / 1_000).toFixed(meters % 1_000 === 0 ? 0 : 1)} km`
+    : `${meters} m`
+}
 
 /** What the route metrics say about barrier crossings, in the rider's terms. */
 function crossingLabel(route: CycleRoute): string {
@@ -177,6 +183,12 @@ export function BottomSheet() {
               <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
                 This route crosses a major road, railway or waterway where no crossing is mapped.
                 Check {currentRoute.barrierCrossingCount === 1 ? 'it' : 'them'} before you ride.
+              </p>
+            )}
+            {wasGapToleranceWidened(currentRoute) && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                No route fit your {currentRoute.requestedGapMeters} m gap tolerance, so it was
+                widened to {formatMeters(currentRoute.appliedGapMeters)} for this one.
               </p>
             )}
             {!currentRoute.barriersChecked && (

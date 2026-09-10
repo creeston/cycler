@@ -119,6 +119,11 @@ describe('graph routing scenarios', () => {
     check(runScenario(sc), sc.expect, sc.keyToName)
   })
 
+  it('gap-penalty-detour: takes the longer all-lane route once gaps are priced', () => {
+    const sc = loadScenario(scenario('gap-penalty-detour.dot'))
+    check(runScenario(sc), sc.expect, sc.keyToName)
+  })
+
   it('barrier-detour: routes the long way round rather than across an arterial', () => {
     const sc = loadScenario(scenario('barrier-detour.dot'))
     check(runScenario(sc), sc.expect, sc.keyToName)

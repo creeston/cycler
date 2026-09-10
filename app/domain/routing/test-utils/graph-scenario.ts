@@ -1,6 +1,7 @@
 import Graph from 'graphology'
 import { readFileSync } from 'fs'
-import { BARRIER_COST_MULTIPLIER } from '../graph'
+import { BARRIER_COST_MULTIPLIER, gapPenaltyFactor } from '../graph'
+import { DEFAULT_PREFERENCES } from '../../entities/route'
 import { parseDot } from './dot-parser'
 import { coordKey } from '../algorithms'
 import type { BikeLaneGraph, EdgeAttrs } from '../graph'
@@ -69,10 +70,16 @@ export function loadScenario(filePath: string): Scenario {
     const distanceMeters = parseFloat(edge.attrs.distance ?? '0')
     // `barrier=major_road|railway|water` marks a gap the router should avoid.
     const barrier = edge.attrs.barrier as EdgeAttrs['barrier']
+    const isGap = edge.attrs.type === 'gap'
+    // Scenario graphs carry no tolerance of their own, so gaps are priced
+    // against the default one — enough to rank a gap against a lane.
+    const penalty =
+      (isGap ? gapPenaltyFactor(distanceMeters, DEFAULT_PREFERENCES.maxGapMeters) : 1) *
+      (barrier ? BARRIER_COST_MULTIPLIER : 1)
     graph.mergeEdge(edge.from, edge.to, {
       distanceMeters,
-      costMeters: barrier ? distanceMeters * BARRIER_COST_MULTIPLIER : distanceMeters,
-      isGap: edge.attrs.type === 'gap',
+      costMeters: distanceMeters * penalty,
+      isGap,
       ...(barrier ? { barrier } : {}),
       geometry: {
         type: 'LineString',
