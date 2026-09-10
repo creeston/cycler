@@ -39,6 +39,12 @@ describe('geo to graph conversion scenarios', () => {
     checkGeoGraph(loadGeoGraphScenario(geojson('shared-endpoint'), expectedDot('shared-endpoint')))
   })
 
+  it('clustered-endpoints: endpoints already joined by lanes get no gap edge', () => {
+    checkGeoGraph(
+      loadGeoGraphScenario(geojson('clustered-endpoints'), expectedDot('clustered-endpoints')),
+    )
+  })
+
   it('round-trip: three lanes forming a closed triangle produce 3 nodes and 3 lane edges', () => {
     checkGeoGraph(loadGeoGraphScenario(geojson('round-trip'), expectedDot('round-trip')))
   })

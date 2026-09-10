@@ -127,7 +127,8 @@ on app start.
    `buildBikeLaneQuery` and posts it through `overpass-client`.
 4. The OSM JSON response is converted by `osmtogeojson`, then by `geojsonToBikeLanes` into
    `BikeLane[]` — LineString features only, everything else discarded.
-5. The area is written to IndexedDB keyed by a bbox id rounded to 3 decimals.
+5. The area is written to IndexedDB keyed by a bbox id rounded to 3 decimals. A browser that
+   refuses the database, or a write that fails, is logged and ignored — see §4.1.
 6. `setBikeLanes` updates the store, the overlay redraws, and `clearRouteCache()` discards stale
    route batches.
 
@@ -175,6 +176,18 @@ their state to `localStorage`.
 | `currentRoute` | localStorage (`cycle-routing`) | yes, but degraded | `createdAt` rehydrates as a `string`, not a `Date` — [`15`](../backlog/15-persisted-route-rehydration.md) |
 | `preferences` | localStorage (`cycle-routing`) | yes | Gap tolerance, routing mode and destination are editable |
 | route batches | module-level `Map` in `build-route.ts` | no | Cleared when new lane data arrives |
+
+### 4.1 When storage is refused
+
+IndexedDB is not always available. A private window, blocked site data or a disabled storage API
+make `indexedDB.open()` reject — Firefox with "The user denied permission to access the
+database." A write can also fail after a successful open, on quota or eviction.
+
+`tryGetDb` resolves to `null` in that case instead of throwing, and every `area-cache` function
+degrades to "no cache": `saveArea` returns `false`, `loadArea` returns `undefined`,
+`loadAllAreas` returns `[]`. The app then refetches every area from Overpass and keeps nothing
+between sessions, but loading lanes and building routes still work. The refusal is remembered for
+the session, so the browser is asked once per page load and one warning reaches the console.
 
 The route batch cache is deliberately mutable module state, so **New Route** is instant. It is
 an LRU bounded to 20 entries and keyed on every routing preference. Start coordinates are rounded

@@ -152,13 +152,14 @@ See [`21-dropped-lanes`](../backlog/21-dropped-lanes.md).
 ### 3.3 Gap edges
 
 When `maxGapMeters > 0`, every unordered pair of distinct nodes not already joined by a lane
-edge is tested:
+edge is tested. A pair that passes becomes a **candidate**:
 
 $$
-(u,v) \in E_{\text{gap}} \iff \text{approxMeters}(u,v) \le g
+(u,v) \in C_{\text{gap}} \iff \text{approxMeters}(u,v) \le g
 $$
 
-with attributes `{ distanceMeters: approxMeters(u,v), isGap: true, geometry: straight line u→v }`.
+Candidates are then pruned (§3.3.2), and each survivor becomes an edge with attributes
+`{ distanceMeters: approxMeters(u,v), isGap: true, geometry: straight line u→v }`.
 
 This is what stitches a fragmented lane network into something routable: the 30 m of car road
 between the end of one segregated path and the start of the next becomes a first-class edge that
@@ -177,10 +178,11 @@ graph LR
     end
 ```
 
-### 3.3.1 What this produces in practice
+### 3.3.1 Why the candidate set has to be pruned
 
-The diagram above shows the intent. Measured on the Warsaw Bemowo fixture (310 lanes, 358 nodes)
-at the default `maxGapMeters = 200`, the reality is:
+The diagram above shows the intent. Taking *every* candidate produces something else. Measured on
+the Warsaw Bemowo fixture (310 lanes, 358 nodes) at the default `maxGapMeters = 200`, the
+unpruned rule gives:
 
 | | |
 |---|---|
@@ -190,7 +192,7 @@ at the default `maxGapMeters = 200`, the reality is:
 | Traversable distance — lane / gap | 37.1 km / **181.4 km** |
 | Gap edges joining already-connected nodes | 664 (28.8 %) |
 
-Because the rule wires together *every* pair of endpoints within the tolerance, and because nodes
+Because the rule wires together every pair of endpoints within the tolerance, and because nodes
 exist only at lane endpoints (§3.1), each junction where several lanes terminate becomes a small
 clique of gap edges. The result is less "lane network plus a few bridges" than "a dense
 straight-line mesh with lanes embedded in it".
@@ -202,9 +204,81 @@ the scale of a road crossing. In other words the gaps connectivity genuinely nee
 graph repair, while the long gaps — the ones most likely to cross an arterial, a railway or a
 river — are the ones that are least necessary.
 
-Tracked as [`27-gap-over-generation`](../backlog/27-gap-over-generation.md), which must precede
-both [`28-barrier-veto`](../backlog/28-barrier-veto.md) and
-[`01-gap-penalty-and-tolerance`](../backlog/01-gap-penalty-and-tolerance.md).
+### 3.3.2 Pruning: which candidates become edges
+
+`selectGapEdges` in `graph.ts` sorts the candidates by length, shortest first, and applies three
+rules in order.
+
+| # | Rule | Effect |
+|---|---|---|
+| 1 | Drop a candidate whose endpoints lane edges already connect | Removes 664 of 2 303 (28.8 %) at provably zero cost to reachability |
+| 2 | Keep a candidate while either endpoint has fewer than `MAX_GAP_EDGES_PER_NODE` gap edges | Keeps the union of the k shortest gaps per node |
+| 3 | Restore any dropped candidate that still joins two separate components | Makes "connectivity is unchanged" true by construction rather than by measurement |
+
+Rule 1 needs the components formed by lane edges alone, so a union-find pass runs over the lane
+edges before the candidates are sorted. Rule 3 continues that union-find through the candidates
+kept by rule 2, so it fires only when both endpoints are already saturated and nothing else
+bridges the two sides. On the Warsaw fixture it never fires; it is the guarantee, not the
+workhorse.
+
+`buildGraph` records the counts as the graph attribute `gapStats`, read with `getGapStats`:
+candidates considered, edges kept, dropped by rule 1, dropped by rule 2, and restored by rule 3.
+
+**What pruning changes on the fixture.** Component counts are identical at every tolerance — the
+primary assertion in `app/integration/gap-pruning.test.ts`:
+
+| `maxGapMeters` | Gap edges before | Gap edges after | Components before / after | Median gap before / after |
+|---|---|---|---|---|
+| 50 | 965 | 263 | 14 / 14 | 29.6 m / 17.1 m |
+| 100 | 1 583 | 321 | 12 / 12 | 43.4 m / 19.9 m |
+| 200 | 2 303 | **441** | 5 / 5 | 60.5 m / 31.1 m |
+| 500 | 6 173 | 545 | 1 / 1 | 254.3 m / 54.6 m |
+
+At the default tolerance that is **80.9 % fewer gap edges**, and invented traversable distance
+falls from 181.4 km to 27.0 km, against 37.1 km of real bike lane.
+
+### 3.3.3 Choosing k
+
+`MAX_GAP_EDGES_PER_NODE = 2`. Connectivity cannot choose k — every value gives the same component
+count — so k was chosen on **route diversity**. The counts below are distinct routes from the
+integration fixture's start point over 2–10 km, averaged across 10 seeded runs of the walks, with
+the mean bike-lane coverage of those routes:
+
+| Variant | Gap edges | Explore routes | Coverage | Round-trip routes | Coverage | Seeds with ≥ 3 round-trip routes |
+|---|---|---|---|---|---|---|
+| Unpruned | 2 303 | 764.1 | 83.9 % | 127.1 | 70.4 % | 10 / 10 |
+| k = 1 | 252 | 66.7 | 98.6 % | **2.4** | 88.6 % | **4 / 10** |
+| k = 2 | 441 | 118.5 | 94.2 % | 28.5 | 87.2 % | 10 / 10 |
+| k = 3 | 597 | 197.9 | 91.3 % | 47.8 | 81.3 % | 10 / 10 |
+| k = 4 | 732 | 180.0 | 92.0 % | 84.7 | 80.5 % | 10 / 10 |
+| k = 6 | 964 | 508.9 | 86.1 % | 116.2 | 76.3 % | 10 / 10 |
+| k = 8 | 1 142 | 551.2 | 86.2 % | 122.5 | 73.8 % | 10 / 10 |
+
+Route counts rise with k and never level off, so there is no k at which diversity stops
+improving. Every increment buys more routes and pays in invented distance and lower coverage. The
+requirement that does discriminate is the fallback in §6.2: below `MIN_ROUTES_BEFORE_EXPAND` = 3
+routes the graph is rebuilt at a 1 000 m tolerance, which undoes the pruning.
+
+- **k = 1 fails it.** Round-trip averages 2.4 routes and misses the threshold in 6 of 10 seeds,
+  so the fallback would fire on most requests.
+- **k = 2 clears it in every seed**, with 28.5 round-trip and 118.5 explore routes — more than
+  "New Route" can cycle through — at the highest lane coverage of any k that clears it.
+- **k ≥ 3** buys routes the UI cannot use, at roughly 27 % more gap edges per step of k and
+  falling coverage.
+
+So k = 2 is the smallest value that never triggers the fallback. Re-run the measurement on a
+denser network before treating these ratios as general.
+
+**Sub-metre gaps are not fixed here.** Of the 441 edges kept at k = 2, only 23 are shorter than
+5 m — the snapping artifacts of §1. Merging those endpoints as *nodes*, by clustering rather than
+`toFixed(5)` rounding, is the better fix and belongs with
+[`09-mid-lane-junctions`](../backlog/09-mid-lane-junctions.md). After pruning they are 5 % of the
+gap edges rather than a headline problem.
+
+Pruning is a prerequisite for [`28-barrier-veto`](../backlog/28-barrier-veto.md) — 441
+intersection tests per build instead of 2 303 — and for
+[`01-gap-penalty-and-tolerance`](../backlog/01-gap-penalty-and-tolerance.md), which prices what
+survives.
 
 ### 3.4 The bounding-box prefilter
 
@@ -240,8 +314,13 @@ Let `L` = lane count, `P` = total polyline vertices, `N = |V| ≤ 2L`.
 | Phase | Cost |
 |---|---|
 | Lane ingestion + `turf.length` | `O(P)` |
-| Gap detection | `O(N²)` prefilter tests, `O(k·N²)` distance calls where `k` is the pass rate |
+| Candidate detection | `O(N²)` prefilter tests, `O(p·N²)` distance calls where `p` is the pass rate |
+| Lane components (union-find) | `O(N α(N))` |
+| Candidate selection | `O(C log C)` for `C` candidates |
 | Total | **`O(N²)`** |
+
+Pruning does not change the asymptotics — finding candidate pairs still dominates — but it removes
+about 80 % of the edge insertion, memory and traversal cost that follows.
 
 A dense city fetch of ~5 000 lanes gives `N ≈ 8 000` and ~32 M pair tests, executed
 synchronously on the main thread. This is the app's dominant cost and the reason "Suggest Route"
@@ -478,7 +557,7 @@ An honest list of the modelling assumptions, in rough order of how much they dis
 | # | Assumption | Consequence | Task |
 |---|---|---|---|
 | 1 | Junctions exist only at lane **endpoints** | A lane ending at the midpoint of another is not connected to it. The network is far more fragmented than the map looks, and the gap-bridging pass hides this by inventing edges through buildings and rivers. | [09](../backlog/09-mid-lane-junctions.md) |
-| 2 | Every endpoint pair within tolerance becomes an edge | 88 % of the graph is synthetic, and ~98 % of that contributes nothing to connectivity (§3.3.1). | [27](../backlog/27-gap-over-generation.md) |
+| 2 | Gap edges are still invented between endpoints, now at most k per node | Pruning cut them from 2 303 to 441 on the fixture (§3.3.2), but 441 straight lines through unverified terrain remain. | [28](../backlog/28-barrier-veto.md), [09](../backlog/09-mid-lane-junctions.md) |
 | 3 | Gap edges are **straight lines** with no barrier check | The "gap" may cross a canal, a railway or a motorway; `layer`/`bridge`/`tunnel` are ignored, so a cycleway on an overpass can be bridged to one beneath it. Distance and rideability are both fictional. | [28](../backlog/28-barrier-veto.md) |
 | 4 | Gap edges cost their length and nothing more | Dijkstra will trade 210 m of protected path for 200 m of arterial road. The premise is not encoded in the cost function anywhere. | [01](../backlog/01-gap-penalty-and-tolerance.md) |
 | 5 | The graph is undirected | `oneway=yes`, contraflow lanes and one-way cycle tracks are ignored. | [09](../backlog/09-mid-lane-junctions.md) |
@@ -512,7 +591,8 @@ Three layers, deliberately separated:
 - **`geo-to-graph`** — does geometry become the right graph? A `.geojson` file annotated with
   `_nodeStart`/`_nodeEnd` names is converted, then compared against an `.expected.dot` listing
   the nodes and edges (with `type=gap` marking synthetic edges). Covers endpoint merging, gap
-  bridging, three-way junctions and closed triangles.
+  bridging, three-way junctions, closed triangles and clustered endpoints that must **not** be
+  bridged.
 - **`graph-to-path`** — given a graph, does the router find the right paths? A `.dot` file carries
   both the graph and its assertions as graph attributes (`start`, `end`, `minDist`, `maxDist`,
   `roundTrip`, `expect_route`, `expect_any_route`, `expect_isRoundTrip`, `expect_minRoutes`,
@@ -521,12 +601,15 @@ Three layers, deliberately separated:
   dead ends, isolated components, gap traversal, loops and point-to-point.
 - **`integration`** — a real Overpass export of Warsaw Bemowo driven through `findRoutes`,
   asserting loop closure, distance bounds, segment-type validity and non-zero lane distance.
+  `gap-pruning.test.ts` builds the same export both ways and asserts that pruning preserves the
+  connected-component count at four tolerances, adds no gap inside a lane component, and still
+  yields many distinct routes.
 
 Each `.dot` file opens with an ASCII sketch of the graph it encodes, which makes the fixtures
 reviewable without running them.
 
-**Current coverage: 36 tests, all passing.** The gaps are above the domain line — no tests for
-the use cases, stores, hooks, Overpass client, IndexedDB cache or GPX writer
+**Current coverage: 81 tests, all passing.** The gaps are above the domain line — no tests for
+the stores, hooks, Overpass client, IndexedDB cache or GPX writer
 ([`22-use-case-tests`](../backlog/22-use-case-tests.md)).
 
 ---
@@ -540,6 +623,7 @@ Every tuning constant in the routing path, in one place.
 | `N_ATTEMPTS` | 80 | `route-finder.ts` | Random walks per start candidate |
 | `EXPANDED_GAP_METERS` | 1 000 | `route-finder.ts` | Gap tolerance used by the fallback pass |
 | `MIN_ROUTES_BEFORE_EXPAND` | 3 | `route-finder.ts` | Threshold that triggers the fallback |
+| `MAX_GAP_EDGES_PER_NODE` | 2 | `graph.ts` | Gap edges kept per node; chosen by the measurement in §3.3.3 |
 | `R` | 6 371 000 m | `graph.ts` | Earth radius for `approxMeters` |
 | snapping precision | 5 decimals | `algorithms.ts` | ≈ 1.11 m × 0.69 m cell at 52° N |
 | prefilter factor | 1.5 (lat), 3.0 (lon) | `graph.ts` | Bounding-box safety margin |

@@ -1,0 +1,57 @@
+{
+  "_maxGapMeters": 200,
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "lane-1",
+        "highway": "cycleway",
+        "name": "Lane A–H",
+        "_nodeStart": "A",
+        "_nodeEnd": "H"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [0.0003, 0.001],
+          [0.001, 0.001]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "lane-2",
+        "highway": "cycleway",
+        "name": "Lane B–H",
+        "_nodeStart": "B",
+        "_nodeEnd": "H"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [0.001, 0.0003],
+          [0.001, 0.001]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "lane-3",
+        "highway": "cycleway",
+        "name": "Lane C–H",
+        "_nodeStart": "C",
+        "_nodeEnd": "H"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [0.0017, 0.001],
+          [0.001, 0.001]
+        ]
+      }
+    }
+  ]
+}

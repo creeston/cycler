@@ -21,14 +21,14 @@ between two lane segments, and the router works within that budget.
 
 > **State of the premise.** The data model expresses this correctly — every route segment is
 > typed `bike_lane` or `gap`, and every route reports its coverage ratio and gap count. The graph
-> does not. Measured on the Warsaw fixture at the default tolerance, 88 % of routing edges are
-> synthetic straight lines between lane endpoints, nothing checks what those lines cross, and
-> gap edges are priced at plain length — so `bikeLaneCoverage` treats unverified terrain as
-> ordinary connective tissue. Closing the loop takes three tasks in order:
-> [`27`](../backlog/27-gap-over-generation.md) prunes the ~98 % of gap edges that carry no
-> connectivity, [`28`](../backlog/28-barrier-veto.md) vetoes those crossing arterials, railways
-> or water, and [`01`](../backlog/01-gap-penalty-and-tolerance.md) prices what survives. Until
-> then the coverage figure is a lane-maximisation score, not a safety claim.
+> is now closer. [`27`](../backlog/27-gap-over-generation.md) pruned the gap edges that carry no
+> connectivity: on the Warsaw fixture at the default tolerance they fell from 2 303 to 441, and
+> synthetic edges from 88 % to 59 % of the graph, with the connected-component count unchanged.
+> What remains is still unverified: nothing checks what a gap line crosses, and gap edges are
+> priced at plain length, so `bikeLaneCoverage` treats the survivors as ordinary connective
+> tissue. Two tasks close the loop: [`28`](../backlog/28-barrier-veto.md) vetoes gaps crossing
+> arterials, railways or water, and [`01`](../backlog/01-gap-penalty-and-tolerance.md) prices
+> what survives. Until then the coverage figure is a lane-maximisation score, not a safety claim.
 
 ---
 

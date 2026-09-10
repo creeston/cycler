@@ -1,0 +1,17 @@
+// Three lanes meeting at H. Their far endpoints A, B and C are 110–155 m apart,
+// so at _maxGapMeters=200 every A/B/C pair is a gap candidate — but lane edges
+// already connect all four nodes, so no gap edge may be added.
+//
+//          C
+//         ╱ lane-3
+//   A ══ H ══ ...
+//        ║ lane-2
+//        B
+//
+//   gap candidates: A–B (110 m), B–C (110 m), A–C (155 m) — all suppressed
+//
+graph clustered_endpoints {
+  A -- H [type=lane]
+  B -- H [type=lane]
+  C -- H [type=lane]
+}
