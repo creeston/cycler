@@ -42,6 +42,8 @@ function route(id: string, totalDistanceMeters = 0): Route {
     bikeLaneDistanceMeters: 0,
     bikeLaneCoverage: 0,
     gapCount: 0,
+    barrierCrossingCount: 0,
+    barriersChecked: true,
     createdAt: new Date(0),
   }
 }
@@ -127,10 +129,10 @@ describe('buildRoute cache', () => {
       message: 'The route there is only 3.2 km, below your 10 km minimum.',
       route: shortRoute,
     })
-    expect(findRoutesMock).toHaveBeenLastCalledWith(lanes, {
-      ...preferences,
-      minDistanceMeters: 0,
-      maxDistanceMeters: Number.MAX_SAFE_INTEGER,
-    })
+    expect(findRoutesMock).toHaveBeenLastCalledWith(
+      lanes,
+      { ...preferences, minDistanceMeters: 0, maxDistanceMeters: Number.MAX_SAFE_INTEGER },
+      undefined,
+    )
   })
 })

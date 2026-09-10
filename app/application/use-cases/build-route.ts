@@ -1,5 +1,6 @@
 import { findRoutes } from '~/domain/routing/route-finder'
 import type { BikeLane } from '~/domain/entities/bike-lane'
+import type { BarrierData } from '~/domain/entities/barrier'
 import type { Route, RoutePreferences } from '~/domain/entities/route'
 
 interface CacheEntry {
@@ -27,9 +28,10 @@ export class DestinationRouteOutsideRangeError extends Error {
   }
 }
 
-function cacheKey(preferences: RoutePreferences): string {
+function cacheKey(preferences: RoutePreferences, barriersChecked: boolean): string {
   // ~100 m precision on start point — close-enough starts reuse the same batch
   return JSON.stringify({
+    barriersChecked,
     lon: preferences.startLon.toFixed(3),
     lat: preferences.startLat.toFixed(3),
     endLon: preferences.endLon,
@@ -60,20 +62,24 @@ function cacheEntry(key: string, entry: CacheEntry): void {
   }
 }
 
-export function buildRoute(lanes: BikeLane[], preferences: RoutePreferences): Route {
-  const key = cacheKey(preferences)
+export function buildRoute(
+  lanes: BikeLane[],
+  preferences: RoutePreferences,
+  barriers?: BarrierData | null,
+): Route {
+  const key = cacheKey(preferences, barriers != null)
   let entry = cachedEntry(key)
 
   if (!entry || entry.routes.length === 0) {
-    const found = findRoutes(lanes, preferences)
+    const found = findRoutes(lanes, preferences, barriers ?? undefined)
     if (found.length === 0) {
       const hasDestination = preferences.endLon !== undefined && preferences.endLat !== undefined
       if (hasDestination) {
-        const [unrestrictedRoute] = findRoutes(lanes, {
-          ...preferences,
-          minDistanceMeters: 0,
-          maxDistanceMeters: Number.MAX_SAFE_INTEGER,
-        })
+        const [unrestrictedRoute] = findRoutes(
+          lanes,
+          { ...preferences, minDistanceMeters: 0, maxDistanceMeters: Number.MAX_SAFE_INTEGER },
+          barriers ?? undefined,
+        )
         if (unrestrictedRoute) {
           const distance = formatKilometers(unrestrictedRoute.totalDistanceMeters)
           const message =

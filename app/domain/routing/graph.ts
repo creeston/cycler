@@ -2,7 +2,10 @@ import Graph from 'graphology'
 import * as turf from '@turf/turf'
 import type { LineString } from 'geojson'
 import type { BikeLane } from '../entities/bike-lane'
-import { coordKey } from './algorithms'
+import type { BarrierData, BarrierKind } from '../entities/barrier'
+import { approxMeters, coordKey } from './algorithms'
+import { buildBarrierIndex, findBlockingBarrier } from './barriers'
+import { osmLevel } from '../mappers/osm-to-barriers'
 
 export interface NodeAttrs {
   lon: number
@@ -11,8 +14,12 @@ export interface NodeAttrs {
 
 export interface EdgeAttrs {
   distanceMeters: number
+  /** What the router minimises: distanceMeters, inflated for edges to avoid. */
+  costMeters: number
   isGap: boolean
   geometry: LineString
+  /** Set when this gap crosses a barrier away from any crossing. */
+  barrier?: BarrierKind
 }
 
 /** Counts from the gap pass, so pruning stays measurable and can be shown in a debug view. */
@@ -21,12 +28,18 @@ export interface GapStats {
   candidates: number
   /** Candidates that became gap edges. */
   kept: number
+  /** Candidates dropped because the two lanes sit on different levels. */
+  droppedGradeSeparated: number
   /** Candidates dropped because lane edges already connect the two nodes. */
   droppedSameComponent: number
   /** Candidates dropped because both endpoints already had MAX_GAP_EDGES_PER_NODE gaps. */
   droppedBeyondLimit: number
   /** Of the kept edges, those restored past the per-node limit to preserve connectivity. */
   keptForConnectivity: number
+  /** Of the kept edges, those marked as crossing a barrier. */
+  barrierCrossings: number
+  /** False when no barrier data was supplied, so nothing was checked. */
+  barriersChecked: boolean
 }
 
 export interface GraphAttrs {
@@ -49,27 +62,27 @@ export const MAX_GAP_EDGES_PER_NODE = 2
 const EMPTY_GAP_STATS: GapStats = {
   candidates: 0,
   kept: 0,
+  droppedGradeSeparated: 0,
   droppedSameComponent: 0,
   droppedBeyondLimit: 0,
   keptForConnectivity: 0,
+  barrierCrossings: 0,
+  barriersChecked: false,
 }
+
+/**
+ * How much a gap that crosses a barrier costs the router beyond its length.
+ * Heavy enough that a detour of any plausible length wins, finite so that a
+ * flagged gap is still taken when it is the only way through — the task this
+ * came from calls for marking, not dropping, until the false-positive rate on
+ * real data is understood.
+ */
+export const BARRIER_COST_MULTIPLIER = 50
 
 interface GapCandidate {
   from: number
   to: number
   distanceMeters: number
-}
-
-/**
- * Equirectangular distance approximation — much faster than Haversine for
- * the inner O(n²) gap-detection loop. Accurate to < 0.1% for d < 10 km.
- */
-function approxMeters(lon1: number, lat1: number, lon2: number, lat2: number): number {
-  const R = 6_371_000
-  const dLat = ((lat2 - lat1) * Math.PI) / 180
-  const dLon = ((lon2 - lon1) * Math.PI) / 180
-  const avgLat = (((lat1 + lat2) / 2) * Math.PI) / 180
-  return R * Math.sqrt(dLat * dLat + (dLon * Math.cos(avgLat)) ** 2)
 }
 
 function findRoot(parent: number[], node: number): number {
@@ -100,7 +113,13 @@ function joinComponents(parent: number[], rank: number[], a: number, b: number):
   return true
 }
 
-function addLaneEdges(graph: BikeLaneGraph, lanes: BikeLane[]): void {
+/**
+ * Adds one edge per lane and returns the levels each node sits on. A node can
+ * carry several levels when lanes at different heights end at the same spot.
+ */
+function addLaneEdges(graph: BikeLaneGraph, lanes: BikeLane[]): Map<string, Set<number>> {
+  const levels = new Map<string, Set<number>>()
+
   for (const lane of lanes) {
     const coords = lane.geometry.coordinates
     const startKey = coordKey(coords[0][0], coords[0][1])
@@ -112,15 +131,36 @@ function addLaneEdges(graph: BikeLaneGraph, lanes: BikeLane[]): void {
       lat: coords[coords.length - 1][1],
     })
 
+    const level = osmLevel(lane.tags)
+    recordLevel(levels, startKey, level)
+    recordLevel(levels, endKey, level)
+
     if (startKey !== endKey && !graph.hasEdge(startKey, endKey)) {
       const dist = turf.length(turf.feature(lane.geometry), { units: 'meters' })
       graph.addEdge(startKey, endKey, {
         distanceMeters: dist,
+        costMeters: dist,
         isGap: false,
         geometry: lane.geometry,
       })
     }
   }
+
+  return levels
+}
+
+function recordLevel(levels: Map<string, Set<number>>, key: string, level: number): void {
+  const known = levels.get(key)
+  if (known) known.add(level)
+  else levels.set(key, new Set([level]))
+}
+
+function sharesLevel(a: Set<number> | undefined, b: Set<number> | undefined): boolean {
+  if (!a || !b) return true
+  for (const level of a) {
+    if (b.has(level)) return true
+  }
+  return false
 }
 
 /**
@@ -183,7 +223,12 @@ function selectGapEdges(
   laneParent: number[],
   laneRank: number[],
   maxGapsPerNode: number,
-): { selected: GapCandidate[]; stats: GapStats } {
+): {
+  selected: GapCandidate[]
+  droppedSameComponent: number
+  droppedBeyondLimit: number
+  keptForConnectivity: number
+} {
   const crossComponent = candidates.filter(
     c => findRoot(laneParent, c.from) !== findRoot(laneParent, c.to),
   )
@@ -215,31 +260,45 @@ function selectGapEdges(
   const selected = crossComponent.filter((_, i) => keptFlags[i])
   return {
     selected,
-    stats: {
-      candidates: candidates.length,
-      kept: selected.length,
-      droppedSameComponent: candidates.length - crossComponent.length,
-      droppedBeyondLimit: crossComponent.length - selected.length,
-      keptForConnectivity,
-    },
+    droppedSameComponent: candidates.length - crossComponent.length,
+    droppedBeyondLimit: crossComponent.length - selected.length,
+    keptForConnectivity,
   }
 }
 
-function addGapEdges(graph: BikeLaneGraph, maxGapMeters: number, maxGapsPerNode: number): GapStats {
+function addGapEdges(
+  graph: BikeLaneGraph,
+  maxGapMeters: number,
+  maxGapsPerNode: number,
+  levels: Map<string, Set<number>>,
+  barriers: BarrierData | undefined,
+): GapStats {
   const nodes = graph.nodes()
   // Pre-compute to avoid repeated attribute lookups in the inner loop
   const attrs = nodes.map(k => graph.getNodeAttributes(k))
 
   const candidates = collectGapCandidates(graph, nodes, attrs, maxGapMeters)
+  const onGrade = candidates.filter(c =>
+    sharesLevel(levels.get(nodes[c.from]), levels.get(nodes[c.to])),
+  )
   const { parent, rank } = laneComponents(graph, nodes)
-  const { selected, stats } = selectGapEdges(candidates, nodes.length, parent, rank, maxGapsPerNode)
+  const { selected, droppedSameComponent, droppedBeyondLimit, keptForConnectivity } =
+    selectGapEdges(onGrade, nodes.length, parent, rank, maxGapsPerNode)
+
+  const index = barriers ? buildBarrierIndex(barriers) : null
+  let barrierCrossings = 0
 
   for (const c of selected) {
     const a = attrs[c.from],
       b = attrs[c.to]
+    const barrier = index ? findBlockingBarrier(index, a.lon, a.lat, b.lon, b.lat) : null
+    if (barrier) barrierCrossings++
+
     graph.addEdge(nodes[c.from], nodes[c.to], {
       distanceMeters: c.distanceMeters,
+      costMeters: barrier ? c.distanceMeters * BARRIER_COST_MULTIPLIER : c.distanceMeters,
       isGap: true,
+      ...(barrier ? { barrier } : {}),
       geometry: {
         type: 'LineString',
         coordinates: [
@@ -250,29 +309,60 @@ function addGapEdges(graph: BikeLaneGraph, maxGapMeters: number, maxGapsPerNode:
     })
   }
 
-  return stats
+  return {
+    candidates: candidates.length,
+    kept: selected.length,
+    droppedGradeSeparated: candidates.length - onGrade.length,
+    droppedSameComponent,
+    droppedBeyondLimit,
+    keptForConnectivity,
+    barrierCrossings,
+    barriersChecked: index !== null,
+  }
+}
+
+export interface GraphOptions {
+  /**
+   * Gap edges kept per node. Exposed so the pruning limit can be measured and
+   * tested; callers in the app leave it at MAX_GAP_EDGES_PER_NODE.
+   */
+  maxGapsPerNode?: number
+  /**
+   * Barrier geometry to test gaps against. Omitted means nothing is checked,
+   * and `gapStats.barriersChecked` says so.
+   */
+  barriers?: BarrierData
 }
 
 /**
  * Builds an undirected graphology graph from bike lane endpoints.
- * Adds pruned synthetic gap edges between endpoint pairs within maxGapMeters —
- * see selectGapEdges for which pairs survive. The pruning counts are stored as
- * the graph attribute `gapStats` and read with getGapStats.
  *
- * maxGapsPerNode exists so the pruning limit can be measured and tested; callers
- * in the app leave it at MAX_GAP_EDGES_PER_NODE.
+ * Adds synthetic gap edges between endpoint pairs within maxGapMeters, minus
+ * the ones that are not worth having: pairs on different levels are dropped
+ * (they pass over or under each other), the rest are pruned by selectGapEdges,
+ * and survivors that cross a barrier away from a crossing are marked and made
+ * expensive rather than removed. Counts are stored as the graph attribute
+ * `gapStats` and read with getGapStats.
  */
 export function buildGraph(
   lanes: BikeLane[],
   maxGapMeters: number,
-  maxGapsPerNode: number = MAX_GAP_EDGES_PER_NODE,
+  options: GraphOptions = {},
 ): BikeLaneGraph {
   const graph: BikeLaneGraph = new Graph({ type: 'undirected', multi: false })
 
-  addLaneEdges(graph, lanes)
+  const levels = addLaneEdges(graph, lanes)
 
   const stats =
-    maxGapMeters > 0 ? addGapEdges(graph, maxGapMeters, maxGapsPerNode) : EMPTY_GAP_STATS
+    maxGapMeters > 0
+      ? addGapEdges(
+          graph,
+          maxGapMeters,
+          options.maxGapsPerNode ?? MAX_GAP_EDGES_PER_NODE,
+          levels,
+          options.barriers,
+        )
+      : EMPTY_GAP_STATS
   graph.setAttribute('gapStats', stats)
 
   return graph

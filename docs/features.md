@@ -22,13 +22,16 @@ between two lane segments, and the router works within that budget.
 > **State of the premise.** The data model expresses this correctly — every route segment is
 > typed `bike_lane` or `gap`, and every route reports its coverage ratio and gap count. The graph
 > is now closer. [`27`](../backlog/27-gap-over-generation.md) pruned the gap edges that carry no
-> connectivity: on the Warsaw fixture at the default tolerance they fell from 2 303 to 441, and
-> synthetic edges from 88 % to 59 % of the graph, with the connected-component count unchanged.
-> What remains is still unverified: nothing checks what a gap line crosses, and gap edges are
-> priced at plain length, so `bikeLaneCoverage` treats the survivors as ordinary connective
-> tissue. Two tasks close the loop: [`28`](../backlog/28-barrier-veto.md) vetoes gaps crossing
-> arterials, railways or water, and [`01`](../backlog/01-gap-penalty-and-tolerance.md) prices
-> what survives. Until then the coverage figure is a lane-maximisation score, not a safety claim.
+> connectivity: on the Warsaw fixture at the default tolerance they fell from 2 303 to 441.
+> [`28`](../backlog/28-barrier-veto.md) then tested those against real geometry: 41 of the 441
+> cross a major road, railway or waterway where no crossing is mapped, and the router now avoids
+> them and tells the rider when it could not. Lanes on different levels are no longer bridged at
+> all.
+>
+> One step is left: a surviving gap still costs plain length, so a 200 m detour through a
+> residential street weighs the same as 200 m of protected path
+> ([`01`](../backlog/01-gap-penalty-and-tolerance.md)). Until that lands, `bikeLaneCoverage` is a
+> lane-maximisation score with a crossing warning attached, not a safety rating.
 
 ---
 
@@ -48,7 +51,7 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 
 | Feature | Status | Where it lives |
 |---|---|---|
-| Fetch bike lanes for the visible map area | **Shipped** | `fetchBikeLanes`, `useBikeLanes` |
+| Fetch bike lanes for the visible map area | **Shipped** | `fetchArea`, `useBikeLanes` |
 | Render the lane network as an orange overlay | **Shipped** | `BikeLaneLayer` |
 | Offline reuse of previously fetched areas | **Shipped** (partial — see §6.6) | `area-cache`, IndexedDB |
 | Suggest an exploratory route from your location | **Shipped** | `exploreStrategy` |

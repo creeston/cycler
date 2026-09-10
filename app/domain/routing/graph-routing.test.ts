@@ -118,4 +118,14 @@ describe('graph routing scenarios', () => {
     const sc = loadScenario(scenario('one-way-branching.dot'))
     check(runScenario(sc), sc.expect, sc.keyToName)
   })
+
+  it('barrier-detour: routes the long way round rather than across an arterial', () => {
+    const sc = loadScenario(scenario('barrier-detour.dot'))
+    check(runScenario(sc), sc.expect, sc.keyToName)
+  })
+
+  it('barrier-last-resort: the walk never takes the flagged gap while a clean one exists', () => {
+    const sc = loadScenario(scenario('barrier-last-resort.dot'))
+    check(runScenario(sc), sc.expect, sc.keyToName)
+  })
 })

@@ -19,6 +19,7 @@ import { geojsonToBikeLanes } from '~/domain/mappers/osm-to-domain'
 import { buildGraph, getGapStats, nodesWithinMeters } from '~/domain/routing/graph'
 import type { BikeLaneGraph } from '~/domain/routing/graph'
 import { coordKey } from '~/domain/routing/algorithms'
+import { osmLevel } from '~/domain/mappers/osm-to-barriers'
 import { runWalks } from '~/domain/routing/route-finder'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 
@@ -80,7 +81,10 @@ describe('gap pruning — Warsaw overpass data', () => {
 
     expect(stats.kept).toBe(countGapEdges(graph))
     expect(stats.candidates).toBe(
-      stats.kept + stats.droppedSameComponent + stats.droppedBeyondLimit,
+      stats.kept +
+        stats.droppedGradeSeparated +
+        stats.droppedSameComponent +
+        stats.droppedBeyondLimit,
     )
     expect(stats.droppedSameComponent).toBeGreaterThan(0)
     expect(stats.droppedBeyondLimit).toBeGreaterThan(0)
@@ -170,6 +174,11 @@ function countRoutes(graph: BikeLaneGraph, roundTrip: boolean): number {
   return signatures.size
 }
 
+function shareLevel(a: Set<number> | undefined, b: Set<number> | undefined): boolean {
+  if (!a || !b) return true
+  return [...a].some(level => b.has(level))
+}
+
 function approxMeters(lon1: number, lat1: number, lon2: number, lat2: number): number {
   const R = 6_371_000
   const dLat = ((lat2 - lat1) * Math.PI) / 180
@@ -182,9 +191,15 @@ function approxMeters(lon1: number, lat1: number, lon2: number, lat2: number): n
  * The pre-pruning graph builder: every endpoint pair within maxGapMeters that
  * no lane edge joins becomes a gap edge. Distances use straight lines rather
  * than turf.length, which is enough for a connectivity baseline.
+ *
+ * It applies one rule that is not pruning: lanes on different levels are never
+ * bridged (task 28). That is a correctness rule about what a connection is, so
+ * the baseline has to honour it for the comparison to isolate pruning.
  */
 function buildGraphUnpruned(lanes: BikeLane[], maxGapMeters: number): BikeLaneGraph {
   const graph: BikeLaneGraph = new Graph({ type: 'undirected', multi: false })
+
+  const levels = new Map<string, Set<number>>()
 
   for (const lane of lanes) {
     const coords = lane.geometry.coordinates
@@ -193,9 +208,18 @@ function buildGraphUnpruned(lanes: BikeLane[], maxGapMeters: number): BikeLaneGr
     const endKey = coordKey(last[0], last[1])
     graph.mergeNode(startKey, { lon: coords[0][0], lat: coords[0][1] })
     graph.mergeNode(endKey, { lon: last[0], lat: last[1] })
+
+    const level = osmLevel(lane.tags)
+    for (const key of [startKey, endKey]) {
+      const known = levels.get(key)
+      if (known) known.add(level)
+      else levels.set(key, new Set([level]))
+    }
     if (startKey !== endKey && !graph.hasEdge(startKey, endKey)) {
+      const distanceMeters = approxMeters(coords[0][0], coords[0][1], last[0], last[1])
       graph.addEdge(startKey, endKey, {
-        distanceMeters: approxMeters(coords[0][0], coords[0][1], last[0], last[1]),
+        distanceMeters,
+        costMeters: distanceMeters,
         isGap: false,
         geometry: lane.geometry,
       })
@@ -212,8 +236,10 @@ function buildGraphUnpruned(lanes: BikeLane[], maxGapMeters: number): BikeLaneGr
       const b = attrs[j]
       const distanceMeters = approxMeters(a.lon, a.lat, b.lon, b.lat)
       if (distanceMeters > maxGapMeters) continue
+      if (!shareLevel(levels.get(nodes[i]), levels.get(nodes[j]))) continue
       graph.addEdge(nodes[i], nodes[j], {
         distanceMeters,
+        costMeters: distanceMeters,
         isGap: true,
         geometry: {
           type: 'LineString',

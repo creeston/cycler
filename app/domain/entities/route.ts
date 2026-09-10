@@ -1,4 +1,5 @@
 import type { LineString } from 'geojson'
+import type { BarrierKind } from './barrier'
 
 export type SegmentType = 'bike_lane' | 'gap'
 
@@ -6,6 +7,8 @@ export interface RouteSegment {
   geometry: LineString
   type: SegmentType
   distanceMeters: number
+  /** Set when this gap crosses a barrier away from any known crossing. */
+  crossesBarrier?: BarrierKind
 }
 
 export interface Route {
@@ -16,6 +19,14 @@ export interface Route {
   /** 0–1 ratio of bike-lane distance to total */
   bikeLaneCoverage: number
   gapCount: number
+  /** Gaps on this route that cross a major road, railway or waterway. */
+  barrierCrossingCount: number
+  /**
+   * False when the route was built without barrier data, so no gap on it was
+   * checked. A route restored from before barrier checking existed reads as
+   * unchecked, which is the honest default.
+   */
+  barriersChecked: boolean
   createdAt: Date
 }
 

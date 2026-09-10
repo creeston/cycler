@@ -86,9 +86,9 @@ graph TD
 
 | Layer | Modules | Depends on |
 |---|---|---|
-| `domain` | `entities/` (BikeLane, Route, RoutePreferences, CachedArea) · `routing/` (graph, route-finder, algorithms) · `mappers/` (osm-to-domain, geojson-from-domain) | nothing in-app; only `geojson` types, `graphology`, `@turf/turf` |
+| `domain` | `entities/` (BikeLane, Barrier, Route, RoutePreferences, CachedArea) · `routing/` (graph, route-finder, algorithms, barriers) · `mappers/` (osm-to-domain, osm-to-barriers, geojson-from-domain) | nothing in-app; only `geojson` types, `graphology`, `@turf/turf` |
 | `infrastructure` | `osm/` (overpass-client, queries) · `cache/` (db, area-cache) · `export/` (gpx) | `domain/entities` |
-| `application` | `use-cases/` (fetchBikeLanes, buildRoute) · `stores/` (map-store, routing-store) | `domain`, `infrastructure` |
+| `application` | `use-cases/` (fetchArea, buildRoute) · `stores/` (map-store, routing-store) | `domain`, `infrastructure` |
 | `presentation` | `components/map` · `components/layout` · `components/ui` · `hooks/` | `application`, plus domain types and view mappers |
 
 ### Deliberate shortcuts
@@ -123,13 +123,18 @@ on app start.
 
 1. `useBikeLanes` reads the current `bbox` from `map-store` (written by `CycleMap` on every move).
 2. `bboxDimensionsKm` rejects anything larger than 50 × 50 km with a "zoom in closer" message.
-3. `fetchBikeLanes(bbox, forceRefresh = true)` builds an Overpass QL query via
-   `buildBikeLaneQuery` and posts it through `overpass-client`.
+3. `fetchArea(bbox, forceRefresh = true)` builds an Overpass QL query via `buildBikeLaneQuery`
+   and posts it through `overpass-client`.
 4. The OSM JSON response is converted by `osmtogeojson`, then by `geojsonToBikeLanes` into
    `BikeLane[]` — LineString features only, everything else discarded.
-5. The area is written to IndexedDB keyed by a bbox id rounded to 3 decimals. A browser that
-   refuses the database, or a write that fails, is logged and ignored — see §4.1.
-6. `setBikeLanes` updates the store, the overlay redraws, and `clearRouteCache()` discards stale
+5. A **second** query, `buildBarrierQuery`, fetches the major roads, railways, water and
+   crossings for the same box, which `geojsonToBarriers` splits into `BarrierData`. This call is
+   allowed to fail on its own: lanes are the product, and a failure yields `barriers: null`,
+   which the route metrics report as "not checked" rather than passing off as verified.
+6. The area — lanes and barriers together — is written to IndexedDB keyed by a bbox id rounded to
+   3 decimals. A browser that refuses the database, or a write that fails, is logged and
+   ignored — see §4.1.
+7. `setBikeLanes` updates the store, the overlay redraws, and `clearRouteCache()` discards stale
    route batches.
 
 On mount, a separate effect calls `loadAllAreas()`, drops entries older than 7 days, and flattens
@@ -173,6 +178,7 @@ their state to `localStorage`.
 | `viewport` | localStorage (`cycle-map-viewport`) | yes | Restores the last map position |
 | `bbox`, `isLoading`, `fetchError`, `lastFetchedAt` | memory | no | Excluded from `partialize` |
 | `bikeLanes` | IndexedDB (`cycle-app` → `areas`) | yes, on mount | Areas older than 7 days are filtered out but never deleted |
+| `barriers` | IndexedDB, with the area | yes, on mount | Null unless **every** restored area has them, so a partly unchecked set is never reported as checked |
 | `currentRoute` | localStorage (`cycle-routing`) | yes, but degraded | `createdAt` rehydrates as a `string`, not a `Date` — [`15`](../backlog/15-persisted-route-rehydration.md) |
 | `preferences` | localStorage (`cycle-routing`) | yes | Gap tolerance, routing mode and destination are editable |
 | route batches | module-level `Map` in `build-route.ts` | no | Cleared when new lane data arrives |

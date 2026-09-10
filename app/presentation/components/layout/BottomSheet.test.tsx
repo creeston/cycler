@@ -86,6 +86,8 @@ describe('BottomSheet preferences', () => {
       bikeLaneDistanceMeters: 1_000,
       bikeLaneCoverage: 1,
       gapCount: 0,
+      barrierCrossingCount: 0,
+      barriersChecked: true,
       createdAt: new Date(0),
     }
     useRoutingStore.setState({ currentRoute: loop })
@@ -94,6 +96,34 @@ describe('BottomSheet preferences', () => {
 
     expect(screen.getByText('Route type')).toBeInTheDocument()
     expect(screen.getByText('Loop', { selector: 'span' })).toBeInTheDocument()
+  })
+
+  it('reports a route with no unmarked crossings', () => {
+    useRoutingStore.setState({ currentRoute: routeWithCrossings(0, true) })
+
+    render(<BottomSheet />)
+
+    expect(screen.getByText('Major crossings')).toBeInTheDocument()
+    expect(screen.getByText('none')).toBeInTheDocument()
+    expect(screen.queryByText(/no crossing is mapped/)).not.toBeInTheDocument()
+  })
+
+  it('warns when a route crosses a barrier where no crossing is mapped', () => {
+    useRoutingStore.setState({ currentRoute: routeWithCrossings(2, true) })
+
+    render(<BottomSheet />)
+
+    expect(screen.getByText('2 unmarked')).toBeInTheDocument()
+    expect(screen.getByText(/no crossing is mapped/)).toBeInTheDocument()
+  })
+
+  it('says so when barrier data was unavailable', () => {
+    useRoutingStore.setState({ currentRoute: routeWithCrossings(0, false) })
+
+    render(<BottomSheet />)
+
+    expect(screen.getByText('not checked')).toBeInTheDocument()
+    expect(screen.getByText(/Barrier data was unavailable/)).toBeInTheDocument()
   })
 
   it('enters destination-picking mode and clears destination coordinates when leaving it', () => {
@@ -118,3 +148,29 @@ describe('BottomSheet preferences', () => {
     expect(screen.getByRole('radio', { name: 'Explore' })).toHaveAttribute('aria-checked', 'true')
   })
 })
+
+function routeWithCrossings(barrierCrossingCount: number, barriersChecked: boolean): Route {
+  return {
+    id: 'route',
+    segments: [
+      {
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [21, 52],
+            [21.1, 52.1],
+          ],
+        },
+        type: 'bike_lane',
+        distanceMeters: 1_000,
+      },
+    ],
+    totalDistanceMeters: 1_000,
+    bikeLaneDistanceMeters: 1_000,
+    bikeLaneCoverage: 1,
+    gapCount: 0,
+    barrierCrossingCount,
+    barriersChecked,
+    createdAt: new Date(0),
+  }
+}

@@ -1,8 +1,9 @@
 import type { LineString } from 'geojson'
 import dijkstra from 'graphology-shortest-path/dijkstra'
 import type { BikeLane } from '../entities/bike-lane'
+import type { BarrierData } from '../entities/barrier'
 import type { Route, RoutePreferences, RouteSegment } from '../entities/route'
-import { buildGraph, nearestNode, nodesWithinMeters } from './graph'
+import { buildGraph, getGapStats, nearestNode, nodesWithinMeters } from './graph'
 import type { BikeLaneGraph, EdgeAttrs } from './graph'
 
 const N_ATTEMPTS = 80
@@ -46,7 +47,41 @@ function orientedGeometry(graph: BikeLaneGraph, fromKey: string, attrs: EdgeAttr
   return { type: 'LineString', coordinates: [...attrs.geometry.coordinates].reverse() }
 }
 
-function segmentsToRoute(segments: RouteSegment[]): Route {
+function toSegment(graph: BikeLaneGraph, fromKey: string, attrs: EdgeAttrs): RouteSegment {
+  return {
+    geometry: orientedGeometry(graph, fromKey, attrs),
+    type: attrs.isGap ? 'gap' : 'bike_lane',
+    distanceMeters: attrs.distanceMeters,
+    ...(attrs.barrier ? { crossesBarrier: attrs.barrier } : {}),
+  }
+}
+
+/**
+ * Bike lanes first, then clean gaps, then gaps that cross a barrier. Each tier
+ * is offered only when the tier above it is empty, so a flagged gap is a last
+ * resort rather than one option among many.
+ */
+function preferredNeighbours(
+  graph: BikeLaneGraph,
+  current: string,
+  neighbours: string[],
+): string[] {
+  const lanes: string[] = []
+  const cleanGaps: string[] = []
+  const barrierGaps: string[] = []
+
+  for (const neighbour of neighbours) {
+    const attrs = graph.getEdgeAttributes(graph.edge(current, neighbour)!)
+    if (!attrs.isGap) lanes.push(neighbour)
+    else if (attrs.barrier) barrierGaps.push(neighbour)
+    else cleanGaps.push(neighbour)
+  }
+
+  if (lanes.length > 0) return lanes
+  return cleanGaps.length > 0 ? cleanGaps : barrierGaps
+}
+
+function segmentsToRoute(segments: RouteSegment[], barriersChecked: boolean): Route {
   const total = segments.reduce((s, seg) => s + seg.distanceMeters, 0)
   const laneDist = segments
     .filter(s => s.type === 'bike_lane')
@@ -58,6 +93,8 @@ function segmentsToRoute(segments: RouteSegment[]): Route {
     bikeLaneDistanceMeters: laneDist,
     bikeLaneCoverage: total > 0 ? laneDist / total : 0,
     gapCount: segments.filter(s => s.type === 'gap').length,
+    barrierCrossingCount: segments.filter(s => s.crossesBarrier !== undefined).length,
+    barriersChecked,
     createdAt: new Date(),
   }
 }
@@ -73,8 +110,8 @@ function signature(segments: RouteSegment[]): string {
 
 /**
  * Single random walk from startKey.
- * At each step prefers non-gap (bike-lane) edges; falls back to gap edges
- * only when no lane neighbours are available.
+ * At each step picks from the best available tier of edges (preferredNeighbours):
+ * bike lanes, then clean gaps, then gaps that cross a barrier.
  * Returns segments if a walk of [minDist, maxDist] was completed, else null.
  */
 function randomWalk(
@@ -92,21 +129,13 @@ function randomWalk(
     const neighbours = graph.neighbors(current).filter(n => !visited.has(n))
     if (neighbours.length === 0) break
 
-    const laneNeighbours = neighbours.filter(n => {
-      const key = graph.edge(current, n)
-      return !graph.getEdgeAttributes(key).isGap
-    })
-    const next = pickRandom(laneNeighbours.length > 0 ? laneNeighbours : neighbours)
+    const next = pickRandom(preferredNeighbours(graph, current, neighbours))
 
     const edgeKey = graph.edge(current, next)
     const attrs = graph.getEdgeAttributes(edgeKey)
 
     total += attrs.distanceMeters
-    segments.push({
-      geometry: orientedGeometry(graph, current, attrs),
-      type: attrs.isGap ? 'gap' : 'bike_lane',
-      distanceMeters: attrs.distanceMeters,
-    })
+    segments.push(toSegment(graph, current, attrs))
 
     visited.add(next)
     current = next
@@ -120,7 +149,7 @@ function randomWalk(
 /**
  * Round-trip random walk from startKey.
  * Never reuses the same edge. Returns to startKey to complete the loop.
- * Prefers bike-lane edges over gap edges at each step.
+ * Uses the same tier preference as randomWalk at each step.
  * Returns segments when back at startKey with total in [minDist, maxDist], else null.
  */
 function randomWalkRoundTrip(
@@ -146,11 +175,7 @@ function randomWalkRoundTrip(
 
     if (availableNeighbours.length === 0) return null
 
-    const laneNeighbours = availableNeighbours.filter(n => {
-      const key = graph.edge(current, n)!
-      return !graph.getEdgeAttributes(key).isGap
-    })
-    const next = pickRandom(laneNeighbours.length > 0 ? laneNeighbours : availableNeighbours)
+    const next = pickRandom(preferredNeighbours(graph, current, availableNeighbours))
 
     const edgeKey = graph.edge(current, next)!
     const attrs = graph.getEdgeAttributes(edgeKey)
@@ -159,18 +184,16 @@ function randomWalkRoundTrip(
 
     total += attrs.distanceMeters
     visitedEdges.add(edgeKey)
-    segments.push({
-      geometry: orientedGeometry(graph, current, attrs),
-      type: attrs.isGap ? 'gap' : 'bike_lane',
-      distanceMeters: attrs.distanceMeters,
-    })
+    segments.push(toSegment(graph, current, attrs))
     current = next
   }
 }
 
 /**
- * Finds the shortest (by total distance) path from startKey to endKey using
- * Dijkstra's algorithm, weighted by distanceMeters.
+ * Finds the cheapest path from startKey to endKey using Dijkstra's algorithm,
+ * weighted by costMeters — length for an ordinary edge, length times
+ * BARRIER_COST_MULTIPLIER for a gap that crosses a barrier. The distance
+ * bounds are still checked against real length, not cost.
  * Returns null when no path exists or the path falls outside [minDist, maxDist].
  */
 function findShortestPath(
@@ -180,7 +203,7 @@ function findShortestPath(
   minDist: number,
   maxDist: number,
 ): RouteSegment[] | null {
-  const nodePath = dijkstra.bidirectional(graph, startKey, endKey, 'distanceMeters')
+  const nodePath = dijkstra.bidirectional(graph, startKey, endKey, 'costMeters')
   if (!nodePath) return null
 
   const segments: RouteSegment[] = []
@@ -192,11 +215,7 @@ function findShortestPath(
     const edgeKey = graph.edge(from, to)!
     const attrs = graph.getEdgeAttributes(edgeKey)
     total += attrs.distanceMeters
-    segments.push({
-      geometry: orientedGeometry(graph, from, attrs),
-      type: attrs.isGap ? 'gap' : 'bike_lane',
-      distanceMeters: attrs.distanceMeters,
-    })
+    segments.push(toSegment(graph, from, attrs))
   }
 
   if (total < minDist || total > maxDist) return null
@@ -214,6 +233,7 @@ export function runWalks(
   maxDist: number,
   roundTrip = false,
 ): Route[] {
+  const barriersChecked = getGapStats(graph).barriersChecked
   const seen = new Set<string>()
   const routes: Route[] = []
   for (let i = 0; i < N_ATTEMPTS; i++) {
@@ -224,7 +244,7 @@ export function runWalks(
     const sig = signature(segs)
     if (!seen.has(sig)) {
       seen.add(sig)
-      routes.push(segmentsToRoute(segs))
+      routes.push(segmentsToRoute(segs, barriersChecked))
     }
   }
   return routes
@@ -242,7 +262,7 @@ export function runOneWay(
   maxDist: number,
 ): Route[] {
   const segments = findShortestPath(graph, startKey, endKey, minDist, maxDist)
-  return segments ? [segmentsToRoute(segments)] : []
+  return segments ? [segmentsToRoute(segments, getGapStats(graph).barriersChecked)] : []
 }
 
 // ---------------------------------------------------------------------------
@@ -327,10 +347,14 @@ function executeWithCandidates(
  * used as candidates, increasing route diversity near multi-lane junctions.
  * Expands gap tolerance to EXPANDED_GAP_METERS when too few routes are found.
  */
-export function findRoutes(lanes: BikeLane[], preferences: RoutePreferences): Route[] {
+export function findRoutes(
+  lanes: BikeLane[],
+  preferences: RoutePreferences,
+  barriers?: BarrierData,
+): Route[] {
   const { startLon, startLat, endLon, endLat, startProximityMeters } = preferences
 
-  let graph = buildGraph(lanes, preferences.maxGapMeters)
+  let graph = buildGraph(lanes, preferences.maxGapMeters, { barriers })
 
   const endKey =
     endLon !== undefined && endLat !== undefined
@@ -343,7 +367,7 @@ export function findRoutes(lanes: BikeLane[], preferences: RoutePreferences): Ro
 
   const tooFew = endKey ? routes.length === 0 : routes.length < MIN_ROUTES_BEFORE_EXPAND
   if (tooFew && preferences.maxGapMeters < EXPANDED_GAP_METERS) {
-    graph = buildGraph(lanes, EXPANDED_GAP_METERS)
+    graph = buildGraph(lanes, EXPANDED_GAP_METERS, { barriers })
     routes = executeWithCandidates(graph, startLon, startLat, startProximityMeters, strategy)
   }
 

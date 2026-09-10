@@ -1,8 +1,9 @@
 import { useCallback, useEffect } from 'react'
-import { fetchBikeLanes } from '~/application/use-cases/fetch-bike-lanes'
+import { fetchArea } from '~/application/use-cases/fetch-area'
 import { clearRouteCache } from '~/application/use-cases/build-route'
 import { loadAllAreas } from '~/infrastructure/cache/area-cache'
 import { useMapStore } from '~/application/stores/map-store'
+import { mergeBarrierData } from '~/domain/entities/barrier'
 
 const STALE_MS = 7 * 24 * 60 * 60 * 1000
 const MAX_AREA_KM = 50
@@ -25,10 +26,15 @@ export function useBikeLanes() {
   useEffect(() => {
     loadAllAreas().then(areas => {
       const now = Date.now()
-      const lanes = areas
-        .filter(a => now - new Date(a.fetchedAt).getTime() < STALE_MS)
-        .flatMap(a => a.bikeLanes)
-      if (lanes.length > 0) setBikeLanes(lanes)
+      const fresh = areas.filter(a => now - new Date(a.fetchedAt).getTime() < STALE_MS)
+      const lanes = fresh.flatMap(a => a.bikeLanes)
+      if (lanes.length === 0) return
+      // One area without barriers makes the whole set unchecked: a gap in an
+      // unchecked area would otherwise be silently reported as verified.
+      const barriers = fresh.every(a => a.barriers)
+        ? mergeBarrierData(fresh.map(a => a.barriers!))
+        : null
+      setBikeLanes(lanes, barriers)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -45,8 +51,8 @@ export function useBikeLanes() {
     setLoading(true)
     setFetchError(null)
     try {
-      const lanes = await fetchBikeLanes(bbox, true)
-      setBikeLanes(lanes)
+      const { bikeLanes: lanes, barriers } = await fetchArea(bbox, true)
+      setBikeLanes(lanes, barriers)
       clearRouteCache()
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : 'Failed to fetch bike lanes')

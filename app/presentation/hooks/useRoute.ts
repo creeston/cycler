@@ -20,6 +20,7 @@ async function resolveStartPoint(
 
 export function useRoute() {
   const bikeLanes = useMapStore(s => s.bikeLanes)
+  const barriers = useMapStore(s => s.barriers)
   const viewport = useMapStore(s => s.viewport)
   const currentRoute = useRoutingStore(s => s.currentRoute)
   const preferences = useRoutingStore(s => s.preferences)
@@ -40,7 +41,7 @@ export function useRoute() {
     await new Promise(resolve => setTimeout(resolve, 0))
     try {
       const [startLon, startLat] = await resolveStartPoint(viewport.longitude, viewport.latitude)
-      const route = buildRoute(bikeLanes, { ...preferences, startLon, startLat })
+      const route = buildRoute(bikeLanes, { ...preferences, startLon, startLat }, barriers)
       setRoute(route)
     } catch (err) {
       if (err instanceof DestinationRouteOutsideRangeError) setOutsideRangeRoute(err.route)
@@ -48,7 +49,16 @@ export function useRoute() {
     } finally {
       setCalculating(false)
     }
-  }, [bikeLanes, viewport, isCalculating, preferences, setRoute, setCalculating, setRouteError])
+  }, [
+    bikeLanes,
+    barriers,
+    viewport,
+    isCalculating,
+    preferences,
+    setRoute,
+    setCalculating,
+    setRouteError,
+  ])
 
   const clear = useCallback(() => setRoute(null), [setRoute])
 

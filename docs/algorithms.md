@@ -15,7 +15,9 @@ Companion documents: [Architecture](architecture.md) · [Features & use cases](f
 graph LR
     A["OSM ways<br/>(Overpass)"] --> B["GeoJSON<br/>LineString features"]
     B -->|geojsonToBikeLanes| C["BikeLane[]<br/>geometry + laneType"]
+    A2["OSM barriers<br/>(Overpass)"] -->|geojsonToBarriers| C2["BarrierData<br/>barriers + crossings"]
     C -->|buildGraph| D["G = (V, E)<br/>undirected, weighted"]
+    C2 --> D
     D -->|"strategy"| E["node/edge sequence"]
     E -->|"segmentsToRoute"| F["Route<br/>+ metrics"]
 
@@ -280,6 +282,87 @@ intersection tests per build instead of 2 303 — and for
 [`01-gap-penalty-and-tolerance`](../backlog/01-gap-penalty-and-tolerance.md), which prices what
 survives.
 
+### 3.3.4 The barrier veto
+
+A gap is a straight line, and until this point nothing said what it crosses. Two rules now do.
+
+**Grade separation.** Each lane's level comes from its OSM tags — `layer` when present, otherwise
++1 for `bridge`, −1 for `tunnel`, else 0 — and each node carries the set of levels of the lanes
+that end there. A candidate whose endpoints share no level is dropped outright: those lanes pass
+over or under one another, whatever the map distance between their endpoints. This is a hard
+drop, not a mark, because such a pair is not a connection at any tolerance.
+
+**Barriers.** `findBlockingBarrier` tests the straight line against geometry a rider cannot cross
+wherever they like:
+
+| Kind | OSM tags |
+|---|---|
+| `major_road` | `highway=motorway\|trunk\|primary\|secondary` |
+| `railway` | `railway=rail\|light_rail\|subway` |
+| `water` | `waterway=river\|canal`, `natural=water` |
+
+A barrier that is itself on a bridge or in a tunnel is discarded when the data is parsed: a
+motorway on a viaduct blocks nothing at ground level. Everything else carrying `bridge` or
+`tunnel`, plus `highway=crossing` and `railway=level_crossing` nodes, becomes a **crossing**.
+
+An intersection is excused when a crossing lies within `CROSSING_TOLERANCE_METERS` (20 m) of the
+intersection point **and** within 5 m of the barrier itself. The second condition matters: a
+crossing node belongs to the way it crosses, so without it the pedestrian crossing on the side
+street would excuse a gap over the arterial beside it.
+
+Gaps that survive are **marked, not dropped**: the edge gets `barrier: <kind>` and a `costMeters`
+of `distanceMeters × BARRIER_COST_MULTIPLIER`. Marking keeps a wrongly flagged gap from
+fragmenting the network into "no route found", which is a worse failure than a flagged route.
+The two routing paths honour the mark differently:
+
+- The walks (§5.1, §5.2) pick from the best non-empty tier: bike lanes, then clean gaps, then
+  flagged gaps. A flagged gap is taken only when a node offers nothing else.
+- Dijkstra (§5.3) minimises `costMeters`, so a flagged gap loses to any detour up to 50× its
+  length. Distance bounds are still checked against real length.
+
+Geometry uses a uniform grid over barrier segments (cells of 0.002°, about 220 m) and an exact
+segment-segment intersection test rather than `turf.lineIntersect`, which would allocate a
+feature per pair.
+
+#### What it flags on the fixture
+
+Warsaw Bemowo, 310 lanes, with the barrier layer for the same box: 339 barriers (254 major roads,
+66 railways, 19 water) and 1 392 crossings.
+
+| `maxGapMeters` | Gap edges | Flagged | Flagged without the crossing rule | Components |
+|---|---|---|---|---|
+| 50 | 263 | 4 | 53 | 14 |
+| 100 | 321 | 14 | 70 | 12 |
+| 200 | 441 | **41 (9.3 %)** | 109 | 5 |
+| 500 | 544 | 76 | 148 | 2 |
+
+Crossings excuse 62 % of the intersections at the default tolerance — the difference between a
+usable veto and one that would flag a quarter of every gap in a city.
+
+All 41 flags at 200 m were re-derived from the raw GeoJSON by an independent script: every one
+crosses a `secondary` road, 40 of them cross a road with **no mapped crossing anywhere on it**,
+and the remaining one has its nearest crossing 36 m away. Nothing sits in the 20–30 m band, so
+the flag count is not sensitive to the exact tolerance. What that check cannot establish is
+whether each flagged crossing is genuinely impossible on the ground; that needs aerial imagery
+and a human.
+
+Grade separation drops one candidate at 500 m on this fixture and none below that — the Bemowo
+cycleways carry almost no `layer`, `bridge` or `tunnel` tags. It costs a component (1 → 2 at
+500 m), which is the correct answer rather than a regression.
+
+Checking costs about **1.4 ms** per graph build here (4.8 ms without barriers, 6.2 ms with),
+plus 2.6 ms to parse and classify the barrier layer.
+
+#### What it still does not know
+
+- A gap that runs **inside** a water polygon without crossing its bank is not flagged. Only
+  boundary crossings are tested.
+- Water bodies mapped as multipolygon **relations** are not fetched, so large lakes may be
+  missing.
+- A crossing is treated as usable by a bike. A footbridge with steps counts.
+- Nothing checks the barrier's own crossability beyond its tags: a `secondary` road with a
+  central reservation and one with a painted line weigh the same.
+
 ### 3.4 The bounding-box prefilter
 
 The pair loop is `O(|V|²)`. To keep the constant small, a rectangular prefilter rejects pairs
@@ -317,6 +400,8 @@ Let `L` = lane count, `P` = total polyline vertices, `N = |V| ≤ 2L`.
 | Candidate detection | `O(N²)` prefilter tests, `O(p·N²)` distance calls where `p` is the pass rate |
 | Lane components (union-find) | `O(N α(N))` |
 | Candidate selection | `O(C log C)` for `C` candidates |
+| Barrier index | `O(B)` for `B` barrier segments |
+| Barrier tests | `O(K · b)` for `K` kept gaps and `b` segments per grid cell |
 | Total | **`O(N²)`** |
 
 Pruning does not change the asymptotics — finding candidate pairs still dominates — but it removes
@@ -369,8 +454,7 @@ current ← start;  total ← 0;  visited ← {start}
 while total < maxDist:
     N ← neighbours(current) \ visited
     if N = ∅: return null
-    Nlane ← { n ∈ N : ¬isGap(current, n) }
-    next ← uniform_random( Nlane ≠ ∅ ? Nlane : N )
+    next ← uniform_random( best_tier(N) )      // lanes ≻ clean gaps ≻ flagged gaps
     total ← total + w(current, next)
     emit segment
     visited ← visited ∪ {next};  current ← next
@@ -378,11 +462,11 @@ while total < maxDist:
 return null
 ```
 
-The **lane-preference rule** — `Nlane` before `N` — is the only place in the entire codebase
-where bike lanes are actually favoured over gaps. It is a hard lexicographic preference at each
-step, not a cost: a gap edge is taken *only* when the current node has no unvisited lane
-neighbour at all. It is local and greedy, and it says nothing about the total gap distance of
-the finished route.
+The **tier preference** in `preferredNeighbours` is where the walks favour real infrastructure:
+bike lanes first, then gaps that cross nothing known to be impassable, then gaps flagged by the
+barrier veto (§3.3.4). It is a hard lexicographic preference at each step, not a cost — a tier is
+offered only when every tier above it is empty — so it is local and greedy, and says nothing
+about the total gap distance of the finished route.
 
 **Distance bounds.** The loop guard is evaluated *before* the edge is appended, and the function
 returns the instant `total ≥ minDist`. Therefore the returned total satisfies
@@ -411,8 +495,7 @@ loop:
         return total ≥ minDist ? segments : null
     A ← { n ∈ neighbours(current) : edge(current,n) ∉ usedEdges }
     if A = ∅: return null
-    Alane ← { n ∈ A : ¬isGap(current, n) }
-    next ← uniform_random( Alane ≠ ∅ ? Alane : A )
+    next ← uniform_random( best_tier(A) )      // same tiers as §5.1
     if total + w(current, next) > maxDist: return null
     total ← total + w;  usedEdges ← usedEdges ∪ {edge};  emit segment
     current ← next
@@ -434,10 +517,12 @@ distance-aware heuristic would pay off most; see
 Point-to-point routing delegates to `graphology-shortest-path`:
 
 ```ts
-dijkstra.bidirectional(graph, startKey, endKey, 'distanceMeters')
+dijkstra.bidirectional(graph, startKey, endKey, 'costMeters')
 ```
 
-Edge weights are lengths in meters, all non-negative, so Dijkstra's optimality holds. Bidirectional
+`costMeters` is the edge length for everything except a gap flagged by the barrier veto, which
+costs 50× its length (§3.3.4). All weights are non-negative, so Dijkstra's optimality holds — over
+cost, not distance. The distance filter below still uses real length. Bidirectional
 search expands from both ends and meets in the middle: same `O((|V| + |E|) log |V|)` bound, but
 typically `√` the explored node count of the unidirectional version.
 
@@ -468,7 +553,8 @@ nearest lane endpoint to the tap, not at the tap itself.
 | Returns to start | never | always | no |
 | `minDist` | guaranteed | guaranteed | filter only |
 | `maxDist` | soft (§5.1) | hard | filter only |
-| Prefers lanes | greedy, per step | greedy, per step | **no** — length only |
+| Prefers lanes | greedy, per step | greedy, per step | **no** — cost only |
+| Avoids flagged gaps | last tier only | last tier only | 50× cost penalty |
 | Attempts | 80 per candidate | 80 per candidate | 1 per candidate |
 | Complexity | `O(N_ATTEMPTS · path length)` | `O(N_ATTEMPTS · trail length)` | `O((V+E) log V)` |
 
@@ -543,6 +629,14 @@ $$
 \text{gapCount} = \bigl|\{\, i : t_i = \text{gap} \,\}\bigr|
 $$
 
+$$
+\text{barrierCrossingCount} = \bigl|\{\, i : s_i \text{ carries } \texttt{crossesBarrier} \,\}\bigr|
+$$
+
+A route also carries `barriersChecked`. It is false when the route was built without barrier
+data, and the UI then says "not checked" rather than "none" — a route restored from before
+barrier checking existed reads as unchecked, which is the honest default.
+
 `coverage` is a **distance ratio**, not a segment ratio — the headline "87 % bike lane" figure in
 the UI. `gapCount` counts gap *edges*, so two consecutive gap edges through an intersection read
 as two gaps even though the cyclist experiences one interruption. It is computed but not yet
@@ -558,7 +652,7 @@ An honest list of the modelling assumptions, in rough order of how much they dis
 |---|---|---|---|
 | 1 | Junctions exist only at lane **endpoints** | A lane ending at the midpoint of another is not connected to it. The network is far more fragmented than the map looks, and the gap-bridging pass hides this by inventing edges through buildings and rivers. | [09](../backlog/09-mid-lane-junctions.md) |
 | 2 | Gap edges are still invented between endpoints, now at most k per node | Pruning cut them from 2 303 to 441 on the fixture (§3.3.2), but 441 straight lines through unverified terrain remain. | [28](../backlog/28-barrier-veto.md), [09](../backlog/09-mid-lane-junctions.md) |
-| 3 | Gap edges are **straight lines** with no barrier check | The "gap" may cross a canal, a railway or a motorway; `layer`/`bridge`/`tunnel` are ignored, so a cycleway on an overpass can be bridged to one beneath it. Distance and rideability are both fictional. | [28](../backlog/28-barrier-veto.md) |
+| 3 | Gap edges are **straight lines**, now tested against barriers | A gap that crosses a major road, railway or waterway away from a crossing is flagged and made expensive (§3.3.4), and lanes on different levels are never bridged. What survives is still a straight line: its distance is the crow-flies distance, not the ride. | [01](../backlog/01-gap-penalty-and-tolerance.md) |
 | 4 | Gap edges cost their length and nothing more | Dijkstra will trade 210 m of protected path for 200 m of arterial road. The premise is not encoded in the cost function anywhere. | [01](../backlog/01-gap-penalty-and-tolerance.md) |
 | 5 | The graph is undirected | `oneway=yes`, contraflow lanes and one-way cycle tracks are ignored. | [09](../backlog/09-mid-lane-junctions.md) |
 | 6 | No heuristic guides the search | Round-trip closure and explore direction are pure chance; 80 attempts stand in for a distance-aware objective. | [02](../backlog/02-astar-routing.md) |
@@ -596,19 +690,22 @@ Three layers, deliberately separated:
 - **`graph-to-path`** — given a graph, does the router find the right paths? A `.dot` file carries
   both the graph and its assertions as graph attributes (`start`, `end`, `minDist`, `maxDist`,
   `roundTrip`, `expect_route`, `expect_any_route`, `expect_isRoundTrip`, `expect_minRoutes`,
-  `expect_hasGap`, `expect_minCoverage`, …). Synthetic node coordinates are assigned along a line
-  so that route node sequences can be reconstructed and compared by name. Covers chains, forks,
-  dead ends, isolated components, gap traversal, loops and point-to-point.
+  `expect_hasGap`, `expect_minCoverage`, …). An edge may carry `barrier=<kind>` to stand in for a
+  flagged gap. Synthetic node coordinates are assigned along a line so that route node sequences
+  can be reconstructed and compared by name. Covers chains, forks, dead ends, isolated
+  components, gap traversal, loops, point-to-point, and both ways of avoiding a flagged gap.
 - **`integration`** — a real Overpass export of Warsaw Bemowo driven through `findRoutes`,
   asserting loop closure, distance bounds, segment-type validity and non-zero lane distance.
   `gap-pruning.test.ts` builds the same export both ways and asserts that pruning preserves the
   connected-component count at four tolerances, adds no gap inside a lane component, and still
-  yields many distinct routes.
+  yields many distinct routes. `barrier-veto.test.ts` adds `overpass-barriers.geojson` — the
+  barrier layer for the same bounding box — and pins the veto rate, the share of intersections
+  that crossings excuse, and that marking never disconnects the graph.
 
 Each `.dot` file opens with an ASCII sketch of the graph it encodes, which makes the fixtures
 reviewable without running them.
 
-**Current coverage: 81 tests, all passing.** The gaps are above the domain line — no tests for
+**Current coverage: 126 tests, all passing.** The gaps are above the domain line — no tests for
 the stores, hooks, Overpass client, IndexedDB cache or GPX writer
 ([`22-use-case-tests`](../backlog/22-use-case-tests.md)).
 
@@ -624,6 +721,10 @@ Every tuning constant in the routing path, in one place.
 | `EXPANDED_GAP_METERS` | 1 000 | `route-finder.ts` | Gap tolerance used by the fallback pass |
 | `MIN_ROUTES_BEFORE_EXPAND` | 3 | `route-finder.ts` | Threshold that triggers the fallback |
 | `MAX_GAP_EDGES_PER_NODE` | 2 | `graph.ts` | Gap edges kept per node; chosen by the measurement in §3.3.3 |
+| `BARRIER_COST_MULTIPLIER` | 50 | `graph.ts` | Cost penalty on a gap that crosses a barrier |
+| `CROSSING_TOLERANCE_METERS` | 20 m | `barriers.ts` | How near a crossing must be to excuse an intersection |
+| `CROSSING_ON_BARRIER_METERS` | 5 m | `barriers.ts` | How near that crossing must be to the barrier itself |
+| barrier index cell | 0.002° | `barriers.ts` | ≈ 220 m grid over barrier segments |
 | `R` | 6 371 000 m | `graph.ts` | Earth radius for `approxMeters` |
 | snapping precision | 5 decimals | `algorithms.ts` | ≈ 1.11 m × 0.69 m cell at 52° N |
 | prefilter factor | 1.5 (lat), 3.0 (lon) | `graph.ts` | Bounding-box safety margin |

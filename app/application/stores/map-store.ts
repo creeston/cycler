@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { BikeLane } from '~/domain/entities/bike-lane'
+import type { BarrierData } from '~/domain/entities/barrier'
 import type { BoundingBox } from '~/domain/entities/area'
 
 interface MapViewport {
@@ -13,12 +14,14 @@ interface MapStore {
   viewport: MapViewport
   bbox: BoundingBox | null
   bikeLanes: BikeLane[]
+  /** Barriers for the loaded lanes, or null when they could not be fetched. */
+  barriers: BarrierData | null
   isLoading: boolean
   fetchError: string | null
   lastFetchedAt: Date | null
   setViewport: (viewport: MapViewport) => void
   setBbox: (bbox: BoundingBox) => void
-  setBikeLanes: (lanes: BikeLane[]) => void
+  setBikeLanes: (lanes: BikeLane[], barriers: BarrierData | null) => void
   setLoading: (loading: boolean) => void
   setFetchError: (error: string | null) => void
 }
@@ -29,12 +32,14 @@ export const useMapStore = create<MapStore>()(
       viewport: { longitude: 4.9, latitude: 52.37, zoom: 13 },
       bbox: null,
       bikeLanes: [],
+      barriers: null,
       isLoading: false,
       fetchError: null,
       lastFetchedAt: null,
       setViewport: viewport => set({ viewport }),
       setBbox: bbox => set({ bbox }),
-      setBikeLanes: bikeLanes => set({ bikeLanes, lastFetchedAt: new Date() }),
+      setBikeLanes: (bikeLanes, barriers) =>
+        set({ bikeLanes, barriers, lastFetchedAt: new Date() }),
       setLoading: isLoading => set({ isLoading }),
       setFetchError: fetchError => set({ fetchError }),
     }),

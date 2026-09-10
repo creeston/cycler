@@ -1,8 +1,9 @@
 import Graph from 'graphology'
 import { readFileSync } from 'fs'
+import { BARRIER_COST_MULTIPLIER } from '../graph'
 import { parseDot } from './dot-parser'
 import { coordKey } from '../algorithms'
-import type { BikeLaneGraph } from '../graph'
+import type { BikeLaneGraph, EdgeAttrs } from '../graph'
 
 export interface ScenarioExpect {
   minRoutes?: number
@@ -65,9 +66,14 @@ export function loadScenario(filePath: string): Scenario {
   for (const edge of edges) {
     const fromLon = graph.getNodeAttribute(edge.from, 'lon')
     const toLon = graph.getNodeAttribute(edge.to, 'lon')
+    const distanceMeters = parseFloat(edge.attrs.distance ?? '0')
+    // `barrier=major_road|railway|water` marks a gap the router should avoid.
+    const barrier = edge.attrs.barrier as EdgeAttrs['barrier']
     graph.mergeEdge(edge.from, edge.to, {
-      distanceMeters: parseFloat(edge.attrs.distance ?? '0'),
+      distanceMeters,
+      costMeters: barrier ? distanceMeters * BARRIER_COST_MULTIPLIER : distanceMeters,
       isGap: edge.attrs.type === 'gap',
+      ...(barrier ? { barrier } : {}),
       geometry: {
         type: 'LineString',
         coordinates: [

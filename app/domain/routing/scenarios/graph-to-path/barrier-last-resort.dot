@@ -1,0 +1,25 @@
+// A offers two gaps of the same length: one clean, one across a railway.
+// Both lead to a chain long enough to finish a walk, so if the walk ever took
+// the flagged gap a second route would appear. Exactly one may.
+//
+//        ~~100m gap~~ B --300m-- C --300m-- D
+//   A ---|
+//        ~~100m gap across a railway~~ X --300m-- Y --300m-- Z
+//
+graph barrier_last_resort {
+  graph [
+    description = "The walk takes a flagged gap only when nothing clean is available",
+    start = "A",
+    minDist = 500,
+    maxDist = 5000,
+    expect_route = "A,B,C,D",
+    expect_maxRoutes = 1
+  ]
+
+  A -- B [distance=100, type=gap]
+  A -- X [distance=100, type=gap, barrier=railway]
+  B -- C [distance=300, type=lane]
+  C -- D [distance=300, type=lane]
+  X -- Y [distance=300, type=lane]
+  Y -- Z [distance=300, type=lane]
+}

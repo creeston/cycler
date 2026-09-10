@@ -156,6 +156,8 @@ describe('CycleMap destination selection', () => {
       bikeLaneDistanceMeters: 1_000,
       bikeLaneCoverage: 1,
       gapCount: 0,
+      barrierCrossingCount: 0,
+      barriersChecked: true,
       createdAt: new Date(0),
     }
     useRoutingStore.setState(state => ({
@@ -190,6 +192,8 @@ describe('CycleMap destination selection', () => {
       bikeLaneDistanceMeters: 1_000,
       bikeLaneCoverage: 1,
       gapCount: 0,
+      barrierCrossingCount: 0,
+      barriersChecked: true,
       createdAt: new Date(0),
     }
     useRoutingStore.setState({ currentRoute: route })

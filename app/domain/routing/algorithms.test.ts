@@ -1,16 +1,21 @@
 import { describe, it, expect } from 'vitest'
 import { coordKey } from './algorithms'
-import { buildGraph, getGapStats, nearestNode } from './graph'
+import { BARRIER_COST_MULTIPLIER, buildGraph, getGapStats, nearestNode } from './graph'
+import { geojsonToBarriers } from '../mappers/osm-to-barriers'
 import type { BikeLane } from '../entities/bike-lane'
 import type { BikeLaneGraph } from './graph'
 
-function makeLane(id: string, coords: [number, number][]): BikeLane {
+function makeLane(
+  id: string,
+  coords: [number, number][],
+  tags: Record<string, string> = {},
+): BikeLane {
   return {
     id,
     osmId: id,
     geometry: { type: 'LineString', coordinates: coords },
     laneType: 'cycleway',
-    tags: {},
+    tags,
   }
 }
 
@@ -130,10 +135,10 @@ describe('buildGraph gap pruning', () => {
   })
 
   it('drops the longest candidate when both endpoints already have nearer gaps', () => {
-    const g = buildGraph(spacedLanes(), 30, 2)
+    const g = buildGraph(spacedLanes(), 30, { maxGapsPerNode: 2 })
     expect(getGapStats(g)).toMatchObject({ candidates: 5, kept: 5 })
 
-    const limited = buildGraph(spacedLanes(), 30, 1)
+    const limited = buildGraph(spacedLanes(), 30, { maxGapsPerNode: 1 })
     expect(getGapStats(limited)).toMatchObject({
       candidates: 5,
       kept: 3,
@@ -144,7 +149,7 @@ describe('buildGraph gap pruning', () => {
   it('restores a dropped candidate when nothing else connects the two components', () => {
     // At k=1 the two pairs saturate their endpoints, so the edge joining the
     // pairs is only kept because connectivity needs it.
-    const g = buildGraph(spacedLanes(), 30, 1)
+    const g = buildGraph(spacedLanes(), 30, { maxGapsPerNode: 1 })
     expect(getGapStats(g).keptForConnectivity).toBe(1)
     expect(countComponents(g)).toBe(1)
   })
@@ -152,6 +157,68 @@ describe('buildGraph gap pruning', () => {
   it('leaves stats empty when gap bridging is off', () => {
     const g = buildGraph(spacedLanes(), 0)
     expect(getGapStats(g)).toMatchObject({ candidates: 0, kept: 0 })
+  })
+})
+
+// ── barrier veto ─────────────────────────────────────────────
+
+describe('buildGraph barrier veto', () => {
+  it('adds no gap between lanes that pass over one another', () => {
+    // Endpoints 15 m apart, one lane at street level and one on a bridge.
+    const ground = makeLane('ground', [
+      [0, 0],
+      [-0.003, 0],
+    ])
+    const overhead = makeLane(
+      'overhead',
+      [
+        [0.00014, 0],
+        [0.003, 0],
+      ],
+      { layer: '1' },
+    )
+    const g = buildGraph([ground, overhead], 200)
+    expect(g.size).toBe(2)
+    expect(getGapStats(g)).toMatchObject({ candidates: 1, kept: 0, droppedGradeSeparated: 1 })
+  })
+
+  it('bridges the same endpoints when both lanes are at street level', () => {
+    const west = makeLane('west', [
+      [0, 0],
+      [-0.003, 0],
+    ])
+    const east = makeLane('east', [
+      [0.00014, 0],
+      [0.003, 0],
+    ])
+    const g = buildGraph([west, east], 200)
+    expect(g.size).toBe(3)
+    expect(getGapStats(g).droppedGradeSeparated).toBe(0)
+  })
+
+  it('marks a gap that crosses a major road and makes it expensive', () => {
+    const g = buildGraph(severedLanes(), 200, { barriers: arterial() })
+    const edge = g.edge(coordKey(0.0005, 0), coordKey(0.0015, 0))
+
+    expect(edge, 'the gap edge is marked, not dropped').toBeDefined()
+    expect(g.getEdgeAttribute(edge, 'barrier')).toBe('major_road')
+    expect(g.getEdgeAttribute(edge, 'costMeters')).toBeCloseTo(
+      g.getEdgeAttribute(edge, 'distanceMeters') * BARRIER_COST_MULTIPLIER,
+    )
+    expect(getGapStats(g)).toMatchObject({ kept: 1, barrierCrossings: 1, barriersChecked: true })
+  })
+
+  it('leaves the gap unmarked when a crossing sits on the road', () => {
+    const g = buildGraph(severedLanes(), 200, { barriers: arterialWithCrossing() })
+    const edge = g.edge(coordKey(0.0005, 0), coordKey(0.0015, 0))
+
+    expect(g.getEdgeAttribute(edge, 'barrier')).toBeUndefined()
+    expect(getGapStats(g)).toMatchObject({ kept: 1, barrierCrossings: 0, barriersChecked: true })
+  })
+
+  it('says nothing was checked when no barrier data is given', () => {
+    const g = buildGraph(severedLanes(), 200)
+    expect(getGapStats(g)).toMatchObject({ kept: 1, barrierCrossings: 0, barriersChecked: false })
   })
 })
 
@@ -224,4 +291,54 @@ function countComponents(graph: BikeLaneGraph): number {
   }
 
   return components
+}
+
+/**
+ * Two lanes either side of lon 0.001. Their inner endpoints are 110 m apart
+ * and the outer ones run far enough away that this is the only gap candidate.
+ */
+function severedLanes(): BikeLane[] {
+  return [
+    makeLane('west', [
+      [0.0005, 0],
+      [-0.002, 0],
+    ]),
+    makeLane('east', [
+      [0.0015, 0],
+      [0.004, 0],
+    ]),
+  ]
+}
+
+function arterial() {
+  return geojsonToBarriers({
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { '@id': 'way/arterial', highway: 'primary' },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [0.001, -0.001],
+            [0.001, 0.001],
+          ],
+        },
+      },
+    ],
+  })
+}
+
+function arterialWithCrossing() {
+  const data = arterial()
+  return {
+    ...data,
+    crossings: [
+      {
+        osmId: 'node/crossing',
+        kind: 'crossing' as const,
+        geometry: { type: 'Point' as const, coordinates: [0.001, 0] },
+      },
+    ],
+  }
 }

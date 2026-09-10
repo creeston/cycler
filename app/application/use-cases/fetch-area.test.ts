@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { FeatureCollection } from 'geojson'
-import { fetchBikeLanes } from './fetch-bike-lanes'
+import { fetchArea } from './fetch-area'
 import { fetchOverpassGeoJSON } from '~/infrastructure/osm/overpass-client'
 import { tryGetDb } from '~/infrastructure/cache/db'
 
@@ -12,7 +12,7 @@ const mockedTryGetDb = vi.mocked(tryGetDb)
 
 const bbox = { west: 20.9, south: 52.2, east: 21.0, north: 52.3 }
 
-describe('fetchBikeLanes', () => {
+describe('fetchArea', () => {
   beforeEach(() => {
     mockedFetch.mockResolvedValue(oneCycleway())
     vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -25,16 +25,18 @@ describe('fetchBikeLanes', () => {
   it('returns the fetched lanes when the browser refuses the cache database', async () => {
     mockedTryGetDb.mockResolvedValue(null)
 
-    const lanes = await fetchBikeLanes(bbox)
+    const { bikeLanes } = await fetchArea(bbox)
 
-    expect(lanes).toHaveLength(1)
-    expect(lanes[0].laneType).toBe('cycleway')
+    expect(bikeLanes).toHaveLength(1)
+    expect(bikeLanes[0].laneType).toBe('cycleway')
   })
 
   it('returns the fetched lanes when caching them fails', async () => {
     mockedTryGetDb.mockResolvedValue(deniedDb())
 
-    await expect(fetchBikeLanes(bbox, true)).resolves.toHaveLength(1)
+    const { bikeLanes } = await fetchArea(bbox, true)
+
+    expect(bikeLanes).toHaveLength(1)
   })
 
   it('serves a cached area without calling Overpass', async () => {
@@ -42,8 +44,31 @@ describe('fetchBikeLanes', () => {
       get: () => Promise.resolve({ id: 'x', bbox, bikeLanes: [], fetchedAt: new Date() }),
     } as unknown as Awaited<ReturnType<typeof tryGetDb>>)
 
-    await expect(fetchBikeLanes(bbox)).resolves.toEqual([])
+    const { bikeLanes, barriers } = await fetchArea(bbox)
+
+    expect(bikeLanes).toEqual([])
+    expect(barriers, 'an area cached before barrier checking reads as unchecked').toBeNull()
     expect(mockedFetch).not.toHaveBeenCalled()
+  })
+
+  it('keeps the lanes when only the barrier query fails', async () => {
+    mockedTryGetDb.mockResolvedValue(null)
+    mockedFetch.mockResolvedValueOnce(oneCycleway()).mockRejectedValueOnce(new Error('502'))
+
+    const { bikeLanes, barriers } = await fetchArea(bbox, true)
+
+    expect(bikeLanes).toHaveLength(1)
+    expect(barriers).toBeNull()
+  })
+
+  it('returns barriers alongside the lanes when both queries succeed', async () => {
+    mockedTryGetDb.mockResolvedValue(null)
+    mockedFetch.mockResolvedValueOnce(oneCycleway()).mockResolvedValueOnce(oneArterial())
+
+    const { barriers } = await fetchArea(bbox, true)
+
+    expect(barriers?.barriers).toHaveLength(1)
+    expect(barriers?.barriers[0].kind).toBe('major_road')
   })
 })
 
@@ -53,6 +78,25 @@ function deniedDb(): Awaited<ReturnType<typeof tryGetDb>> {
   return { put: denied, get: denied, getAll: denied, delete: denied } as unknown as Awaited<
     ReturnType<typeof tryGetDb>
   >
+}
+
+function oneArterial(): FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: { '@id': 'way/2', highway: 'primary' },
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [20.955, 52.2],
+            [20.955, 52.3],
+          ],
+        },
+      },
+    ],
+  }
 }
 
 function oneCycleway(): FeatureCollection {

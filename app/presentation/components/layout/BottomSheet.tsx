@@ -9,6 +9,7 @@ import { useMapStore } from '~/application/stores/map-store'
 import { useRoutingStore } from '~/application/stores/routing-store'
 import { downloadGpx } from '~/infrastructure/export/gpx'
 import { isRoundTrip } from '~/domain/entities/route'
+import type { Route as CycleRoute } from '~/domain/entities/route'
 
 type RouteMode = 'explore' | 'loop' | 'destination'
 
@@ -17,6 +18,20 @@ const ROUTE_MODES: { label: string; value: RouteMode }[] = [
   { label: 'Loop', value: 'loop' },
   { label: 'To destination', value: 'destination' },
 ]
+
+/** What the route metrics say about barrier crossings, in the rider's terms. */
+function crossingLabel(route: CycleRoute): string {
+  if (!route.barriersChecked) return 'not checked'
+  if (route.barrierCrossingCount === 0) return 'none'
+  return `${route.barrierCrossingCount} unmarked`
+}
+
+function crossingToneClass(route: CycleRoute): string {
+  if (!route.barriersChecked) return 'font-medium text-gray-400'
+  return route.barrierCrossingCount === 0
+    ? 'font-medium text-gray-900'
+    : 'font-medium text-amber-600'
+}
 
 export function BottomSheet() {
   const [expanded, setExpanded] = useState(true)
@@ -142,6 +157,12 @@ export function BottomSheet() {
                   {Math.round(currentRoute.bikeLaneCoverage * 100)}%
                 </span>
               </div>
+              <div className="flex justify-between">
+                <span>Major crossings</span>
+                <span className={crossingToneClass(currentRoute)}>
+                  {crossingLabel(currentRoute)}
+                </span>
+              </div>
               {isRoundTrip(currentRoute) && (
                 <div className="flex justify-between">
                   <span>Route type</span>
@@ -151,6 +172,19 @@ export function BottomSheet() {
                 </div>
               )}
             </div>
+
+            {currentRoute.barriersChecked && currentRoute.barrierCrossingCount > 0 && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                This route crosses a major road, railway or waterway where no crossing is mapped.
+                Check {currentRoute.barrierCrossingCount === 1 ? 'it' : 'them'} before you ride.
+              </p>
+            )}
+            {!currentRoute.barriersChecked && (
+              <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                Barrier data was unavailable, so nothing on this route was checked against major
+                roads, railways or water.
+              </p>
+            )}
 
             <div className="flex gap-2">
               <Button

@@ -1,0 +1,24 @@
+// One-way from A to E. The direct way out of B is a gap that crosses an
+// arterial; the long way round is four times the distance but rideable.
+// Dijkstra weighs costMeters, so the flagged gap must lose.
+//
+//   A --200m lane-- B ~~100m gap across a primary road~~ E
+//                   |                                    |
+//                   +--300m-- C --300m-- D --300m---------+
+//
+graph barrier_detour {
+  graph [
+    description = "Point-to-point routing takes the long clean way rather than a flagged gap",
+    start = "A",
+    end = "E",
+    minDist = 0,
+    maxDist = 5000,
+    expect_route = "A,B,C,D,E"
+  ]
+
+  A -- B [distance=200, type=lane]
+  B -- E [distance=100, type=gap, barrier=major_road]
+  B -- C [distance=300, type=lane]
+  C -- D [distance=300, type=lane]
+  D -- E [distance=300, type=lane]
+}
