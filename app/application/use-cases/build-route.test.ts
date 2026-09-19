@@ -42,6 +42,7 @@ function route(id: string, totalDistanceMeters = 0): Route {
     bikeLaneDistanceMeters: 0,
     bikeLaneCoverage: 0,
     gapCount: 0,
+    gapDistanceMeters: 0,
     barrierCrossingCount: 0,
     barriersChecked: true,
     requestedGapMeters: 200,

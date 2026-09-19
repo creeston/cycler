@@ -104,9 +104,9 @@ Controls, in full — this is the entire interactive surface of the application:
 
 Design language: OpenFreeMap Positron as a deliberately desaturated base so the network reads at
 a glance; lanes in `#f86324` with a white casing at 85 % opacity, dropping to 30 % once a route
-is drawn; the active route in `#FF5400` at full opacity with a heavier casing. Gap connectors are
-rendered with `line-opacity: 0` — the layer exists, styled and filtered, waiting for a toggle
-([`25`](../backlog/25-gap-count-metric-ui.md)).
+is drawn; the active route in `#FF5400` at full opacity with a heavier casing. Road gaps use
+colorblind-safe blue (`#0072B2`) dashes over a strong white casing so they remain distinct from
+the orange route and legible against the base map outdoors.
 
 ---
 

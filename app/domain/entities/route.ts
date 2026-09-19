@@ -19,6 +19,8 @@ export interface Route {
   /** 0–1 ratio of bike-lane distance to total */
   bikeLaneCoverage: number
   gapCount: number
+  /** Total distance ridden outside mapped bike-lane infrastructure, in metres. */
+  gapDistanceMeters: number
   /** Gaps on this route that cross a major road, railway or waterway. */
   barrierCrossingCount: number
   /**

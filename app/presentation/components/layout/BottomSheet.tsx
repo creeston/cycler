@@ -8,7 +8,7 @@ import { useRoute } from '~/presentation/hooks/useRoute'
 import { useMapStore } from '~/application/stores/map-store'
 import { useRoutingStore } from '~/application/stores/routing-store'
 import { downloadGpx } from '~/infrastructure/export/gpx'
-import { isRoundTrip, wasGapToleranceWidened } from '~/domain/entities/route'
+import { isRoundTrip, longestGapMeters, wasGapToleranceWidened } from '~/domain/entities/route'
 import type { Route as CycleRoute } from '~/domain/entities/route'
 
 type RouteMode = 'explore' | 'loop' | 'destination'
@@ -20,9 +20,17 @@ const ROUTE_MODES: { label: string; value: RouteMode }[] = [
 ]
 
 function formatMeters(meters: number): string {
-  return meters >= 1_000
-    ? `${(meters / 1_000).toFixed(meters % 1_000 === 0 ? 0 : 1)} km`
-    : `${meters} m`
+  const rounded = Math.round(meters)
+  return rounded >= 1_000
+    ? `${(rounded / 1_000).toFixed(rounded % 1_000 === 0 ? 0 : 1)} km`
+    : `${rounded} m`
+}
+
+function gapSummary(route: CycleRoute): string {
+  const noun = route.gapCount === 1 ? 'road gap' : 'road gaps'
+  const distance =
+    route.gapDistanceMeters ?? route.totalDistanceMeters - route.bikeLaneDistanceMeters
+  return `${route.gapCount} ${noun} · ${formatMeters(Math.max(0, distance))}`
 }
 
 /** What the route metrics say about barrier crossings, in the rider's terms. */
@@ -163,6 +171,26 @@ export function BottomSheet() {
                   {Math.round(currentRoute.bikeLaneCoverage * 100)}%
                 </span>
               </div>
+              <div className="flex justify-between">
+                <span>Gaps</span>
+                <span
+                  className={
+                    currentRoute.gapCount === 0
+                      ? 'font-medium text-gray-900'
+                      : 'font-medium text-sky-700'
+                  }
+                >
+                  {gapSummary(currentRoute)}
+                </span>
+              </div>
+              {currentRoute.gapCount > 0 && (
+                <div className="flex justify-between">
+                  <span>Longest gap</span>
+                  <span className="font-medium text-sky-700">
+                    {formatMeters(longestGapMeters(currentRoute))}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span>Major crossings</span>
                 <span className={crossingToneClass(currentRoute)}>

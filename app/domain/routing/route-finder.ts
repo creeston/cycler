@@ -70,6 +70,9 @@ function segmentsToRoute(
   const laneDist = segments
     .filter(s => s.type === 'bike_lane')
     .reduce((s, seg) => s + seg.distanceMeters, 0)
+  const gapDist = segments
+    .filter(s => s.type === 'gap')
+    .reduce((s, seg) => s + seg.distanceMeters, 0)
   return {
     id: crypto.randomUUID(),
     segments,
@@ -77,6 +80,7 @@ function segmentsToRoute(
     bikeLaneDistanceMeters: laneDist,
     bikeLaneCoverage: total > 0 ? laneDist / total : 0,
     gapCount: segments.filter(s => s.type === 'gap').length,
+    gapDistanceMeters: gapDist,
     barrierCrossingCount: segments.filter(s => s.crossesBarrier !== undefined).length,
     barriersChecked,
     requestedGapMeters: gapMeters,

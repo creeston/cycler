@@ -29,6 +29,7 @@ const candidate: Route = {
   bikeLaneDistanceMeters: 3_200,
   bikeLaneCoverage: 1,
   gapCount: 0,
+  gapDistanceMeters: 0,
   barrierCrossingCount: 0,
   barriersChecked: true,
   requestedGapMeters: 200,

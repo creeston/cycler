@@ -61,6 +61,9 @@ function check(routes: Route[], sc: Scenario) {
       sc.minDist,
     )
     expect(route.totalDistanceMeters, 'route longer than maxDist').toBeLessThanOrEqual(sc.maxDist)
+    expect(route.bikeLaneDistanceMeters + route.gapDistanceMeters).toBeCloseTo(
+      route.totalDistanceMeters,
+    )
   }
 
   if (ex.minRoutes !== undefined) expect(routes.length).toBeGreaterThanOrEqual(ex.minRoutes)
@@ -118,6 +121,14 @@ describe('graph routing scenarios', () => {
   it('gap-bridging: finds exact route A,B,C,D,E,F traversing the gap edge', () => {
     const sc = loadScenario(scenario('gap-bridging.dot'))
     check(runScenario(sc), sc)
+  })
+
+  it('gap-metrics: counts gap segments and sums their distance', () => {
+    const sc = loadScenario(scenario('gap-metrics.dot'))
+    const routes = runScenario(sc)
+    check(routes, sc)
+
+    expect(routes[0]).toMatchObject({ gapCount: 3, gapDistanceMeters: 640 })
   })
 
   it('dead-end: finds exact route A,B,C,E,F bypassing the dead-end branch', () => {

@@ -824,6 +824,8 @@ $$
 D_{\text{total}} = \sum_{i=1}^{k} d_i
 \qquad
 D_{\text{lane}} = \sum_{i\,:\,t_i = \text{bike\_lane}} d_i
+\qquad
+D_{\text{gap}} = \sum_{i\,:\,t_i = \text{gap}} d_i
 $$
 
 $$
@@ -844,13 +846,14 @@ A route also carries three facts about how it was built:
 | `requestedGapMeters` | The tolerance the rider asked for. |
 | `appliedGapMeters` | The tolerance the route was actually built with. Larger than the requested one only after the fallback in §6.2. |
 
-`wasGapToleranceWidened` compares the last two, and `longestGapMeters` gives the longest gap on
-the route — the number the guarantee in §6.2 is checked against.
+`wasGapToleranceWidened` compares the last two, `gapDistanceMeters` stores
+$D_{\text{gap}}$, and `longestGapMeters` gives the longest gap on the route — the number the
+guarantee in §6.2 is checked against.
 
 `coverage` is a **distance ratio**, not a segment ratio — the headline "87 % bike lane" figure in
 the UI. `gapCount` counts gap *edges*, so two consecutive gap edges through an intersection read
-as two gaps even though the cyclist experiences one interruption. It is computed but not yet
-displayed ([`25-gap-count-metric-ui`](../backlog/25-gap-count-metric-ui.md)).
+as two gaps even though the cyclist experiences one interruption. The UI shows that count beside
+the total and longest gap distances so riders can judge both frequency and scale.
 
 ---
 
@@ -904,9 +907,9 @@ Three layers, deliberately separated:
   flagged gap. A node may carry `x`/`y` positions in metres, from which an edge's length defaults;
   nodes without one are placed along a line short enough to keep the A* heuristic admissible.
   Either way route node sequences can be reconstructed and compared by name. Covers chains,
-  forks, dead ends, isolated components, gap traversal, loops, the distance ceiling,
-  point-to-point, a loop through a ring of dead ends, a lollipop that has no loop, both ways of
-  avoiding a flagged gap, and the node count A* saves against Dijkstra.
+  forks, dead ends, isolated components, gap traversal and distance aggregation, loops, the
+  distance ceiling, point-to-point, a loop through a ring of dead ends, a lollipop that has no
+  loop, both ways of avoiding a flagged gap, and the node count A* saves against Dijkstra.
 - **`integration`** — a real Overpass export of Warsaw Bemowo driven through `findRoutes`,
   asserting loop closure, distance bounds, segment-type validity and non-zero lane distance.
   `gap-tolerance.test.ts` checks the promise made about `maxGapMeters` — no returned route
@@ -924,7 +927,7 @@ Three layers, deliberately separated:
 Each `.dot` file opens with an ASCII sketch of the graph it encodes, which makes the fixtures
 reviewable without running them.
 
-**Current coverage: 206 tests, all passing.** The gaps are above the domain line — no tests for
+**Current coverage: 210 tests, all passing.** The gaps are above the domain line — no tests for
 the stores, hooks, Overpass client, IndexedDB cache or GPX writer
 ([`22-use-case-tests`](../backlog/22-use-case-tests.md)).
 

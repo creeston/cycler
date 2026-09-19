@@ -4,9 +4,9 @@ import { routeToFeatureCollection } from '~/domain/mappers/geojson-from-domain'
 import { useRoutingStore } from '~/application/stores/routing-store'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const LANE_FILTER: any = ['==', ['get', 'kind'], 'lane']
+const BIKE_LANE_FILTER: any = ['==', ['get', 'type'], 'bike_lane']
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const CONNECTOR_FILTER: any = ['==', ['get', 'kind'], 'connector']
+const GAP_FILTER: any = ['==', ['get', 'type'], 'gap']
 
 export function RouteLayer() {
   const route = useRoutingStore(s => s.currentRoute)
@@ -17,33 +17,40 @@ export function RouteLayer() {
 
   return (
     <Source id="route" type="geojson" data={data}>
-      {/* Lane segments — white casing + orange fill */}
+      {/* Mapped bike-lane segments — white casing + orange fill */}
       <Layer
         id="route-lane-casing"
         type="line"
-        filter={LANE_FILTER}
+        filter={BIKE_LANE_FILTER}
         paint={{ 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.55 }}
         layout={{ 'line-cap': 'round', 'line-join': 'round' }}
       />
       <Layer
         id="route-lane-fill"
         type="line"
-        filter={LANE_FILTER}
+        filter={BIKE_LANE_FILTER}
         paint={{ 'line-color': '#FF5400', 'line-width': 5, 'line-opacity': 1 }}
         layout={{ 'line-cap': 'round', 'line-join': 'round' }}
       />
-      {/* Gap connectors — hidden for now, kept for future toggle feature */}
+      {/* Road gaps — a strong casing and blue dashes keep them legible outdoors. */}
       <Layer
-        id="route-connector"
+        id="route-gap-casing"
         type="line"
-        filter={CONNECTOR_FILTER}
+        filter={GAP_FILTER}
+        paint={{ 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.9 }}
+        layout={{ 'line-cap': 'butt', 'line-join': 'round' }}
+      />
+      <Layer
+        id="route-gap-fill"
+        type="line"
+        filter={GAP_FILTER}
         paint={{
-          'line-color': '#FC4C02',
-          'line-width': 2,
-          'line-opacity': 0,
-          'line-dasharray': [4, 3],
+          'line-color': '#0072B2',
+          'line-width': 6,
+          'line-opacity': 1,
+          'line-dasharray': [1.5, 1.25],
         }}
-        layout={{ 'line-cap': 'butt' }}
+        layout={{ 'line-cap': 'butt', 'line-join': 'round' }}
       />
     </Source>
   )

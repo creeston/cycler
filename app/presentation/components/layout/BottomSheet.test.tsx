@@ -86,6 +86,7 @@ describe('BottomSheet preferences', () => {
       bikeLaneDistanceMeters: 1_000,
       bikeLaneCoverage: 1,
       gapCount: 0,
+      gapDistanceMeters: 0,
       barrierCrossingCount: 0,
       barriersChecked: true,
       requestedGapMeters: 200,
@@ -98,6 +99,41 @@ describe('BottomSheet preferences', () => {
 
     expect(screen.getByText('Route type')).toBeInTheDocument()
     expect(screen.getByText('Loop', { selector: 'span' })).toBeInTheDocument()
+  })
+
+  it('shows the road-gap count, total distance, and longest gap', () => {
+    const route = routeWithCrossings(0, true)
+    useRoutingStore.setState({
+      currentRoute: {
+        ...route,
+        segments: [
+          segment('bike_lane', 640, 21),
+          segment('gap', 100, 21.01),
+          segment('gap', 200, 21.02),
+          segment('gap', 340, 21.03),
+        ],
+        totalDistanceMeters: 1_280,
+        bikeLaneDistanceMeters: 640,
+        bikeLaneCoverage: 0.5,
+        gapCount: 3,
+        gapDistanceMeters: 640,
+      },
+    })
+
+    render(<BottomSheet />)
+
+    expect(screen.getByText('3 road gaps · 640 m')).toBeInTheDocument()
+    expect(screen.getByText('Longest gap')).toBeInTheDocument()
+    expect(screen.getByText('340 m')).toBeInTheDocument()
+  })
+
+  it('reports no road gaps without showing a longest-gap row', () => {
+    useRoutingStore.setState({ currentRoute: routeWithCrossings(0, true) })
+
+    render(<BottomSheet />)
+
+    expect(screen.getByText('0 road gaps · 0 m')).toBeInTheDocument()
+    expect(screen.queryByText('Longest gap')).not.toBeInTheDocument()
   })
 
   it('reports a route with no unmarked crossings', () => {
@@ -191,10 +227,25 @@ function routeWithCrossings(barrierCrossingCount: number, barriersChecked: boole
     bikeLaneDistanceMeters: 1_000,
     bikeLaneCoverage: 1,
     gapCount: 0,
+    gapDistanceMeters: 0,
     barrierCrossingCount,
     barriersChecked,
     requestedGapMeters: 200,
     appliedGapMeters: 200,
     createdAt: new Date(0),
+  }
+}
+
+function segment(type: 'bike_lane' | 'gap', distanceMeters: number, lon: number) {
+  return {
+    geometry: {
+      type: 'LineString' as const,
+      coordinates: [
+        [lon, 52],
+        [lon + 0.01, 52],
+      ],
+    },
+    type,
+    distanceMeters,
   }
 }

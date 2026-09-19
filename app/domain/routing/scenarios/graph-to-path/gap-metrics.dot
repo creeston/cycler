@@ -1,0 +1,19 @@
+// A point-to-point route made of three road gaps with known lengths.
+// The exact distances make the aggregate gap metrics easy to verify.
+//
+//   A ~~100m~~ B ~~200m~~ C ~~340m~~ D
+//
+graph gap_metrics {
+  graph [
+    description = "Three gap segments are counted and their distances summed",
+    start = "A",
+    end = "D",
+    minDist = 0,
+    maxDist = 1000,
+    expect_route = "A,B,C,D"
+  ]
+
+  A -- B [distance=100, type=gap]
+  B -- C [distance=200, type=gap]
+  C -- D [distance=340, type=gap]
+}
