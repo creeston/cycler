@@ -8,11 +8,16 @@ import { buildBarrierIndex, findBlockingBarrier } from './barriers'
 import { osmLevel } from '../mappers/osm-to-barriers'
 
 export interface NodeAttrs {
+  /** A representative raw endpoint position; the snapped graph key is the node's identity. */
   lon: number
   lat: number
 }
 
 export interface EdgeAttrs {
+  /** Graph key matching the first geometry coordinate. */
+  startKey: string
+  /** Graph key matching the last geometry coordinate. */
+  endKey: string
   distanceMeters: number
   /** What the router minimises: distanceMeters, inflated for edges to avoid. */
   costMeters: number
@@ -230,6 +235,9 @@ function addLanePiece(
   const startKey = coordKey(start[0], start[1])
   const endKey = coordKey(end[0], end[1])
 
+  // Multiple raw endpoints can share one snapped key. Deliberately keep the
+  // last writer: this preserves a position from real lane geometry instead of
+  // inventing a grid-centre coordinate. Identity-sensitive code must use the key.
   graph.mergeNode(startKey, { lon: start[0], lat: start[1] })
   graph.mergeNode(endKey, { lon: end[0], lat: end[1] })
   recordLevel(levels, startKey, level)
@@ -243,6 +251,8 @@ function addLanePiece(
       : { type: 'LineString', coordinates: coords }
   const dist = turf.length(turf.feature(geometry), { units: 'meters' })
   graph.addEdge(startKey, endKey, {
+    startKey,
+    endKey,
     distanceMeters: dist,
     costMeters: dist,
     isGap: false,
@@ -403,6 +413,8 @@ function addGapEdges(
       gapPenalty(c.distanceMeters, maxGapMeters) * (barrier ? BARRIER_COST_MULTIPLIER : 1)
 
     graph.addEdge(nodes[c.from], nodes[c.to], {
+      startKey: nodes[c.from],
+      endKey: nodes[c.to],
       distanceMeters: c.distanceMeters,
       costMeters: c.distanceMeters * penalty,
       isGap: true,

@@ -52,18 +52,14 @@ function pickWeighted<T>(items: T[], weights: number[]): T {
  * differ from the walk traversal direction. Reversing when needed ensures that
  * segment geometries always reflect the actual path direction.
  */
-function orientedGeometry(graph: BikeLaneGraph, fromKey: string, attrs: EdgeAttrs): LineString {
-  const fromAttrs = graph.getNodeAttributes(fromKey)
-  const first = attrs.geometry.coordinates[0]
-  if (Math.abs(first[0] - fromAttrs.lon) < 1e-9 && Math.abs(first[1] - fromAttrs.lat) < 1e-9) {
-    return attrs.geometry
-  }
+function orientedGeometry(fromKey: string, attrs: EdgeAttrs): LineString {
+  if (attrs.startKey === fromKey) return attrs.geometry
   return { type: 'LineString', coordinates: [...attrs.geometry.coordinates].reverse() }
 }
 
-function toSegment(graph: BikeLaneGraph, fromKey: string, attrs: EdgeAttrs): RouteSegment {
+function toSegment(fromKey: string, attrs: EdgeAttrs): RouteSegment {
   return {
-    geometry: orientedGeometry(graph, fromKey, attrs),
+    geometry: orientedGeometry(fromKey, attrs),
     type: attrs.isGap ? 'gap' : 'bike_lane',
     distanceMeters: attrs.distanceMeters,
     ...(attrs.barrier ? { crossesBarrier: attrs.barrier } : {}),
@@ -162,7 +158,7 @@ function randomWalk(
     const attrs = graph.getEdgeAttributes(edgeKey)
 
     total += attrs.distanceMeters
-    segments.push(toSegment(graph, current, attrs))
+    segments.push(toSegment(current, attrs))
 
     visited.add(next)
     current = next
@@ -211,7 +207,7 @@ function randomWalkRoundTrip(
 
     total += attrs.distanceMeters
     visitedEdges.add(edgeKey)
-    segments.push(toSegment(graph, current, attrs))
+    segments.push(toSegment(current, attrs))
     current = next
   }
 }
@@ -242,7 +238,7 @@ function findShortestPath(
     const edgeKey = graph.edge(from, to)!
     const attrs = graph.getEdgeAttributes(edgeKey)
     total += attrs.distanceMeters
-    segments.push(toSegment(graph, from, attrs))
+    segments.push(toSegment(from, attrs))
   }
 
   if (total < minDist || total > maxDist) return null

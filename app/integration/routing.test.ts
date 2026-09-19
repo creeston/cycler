@@ -20,6 +20,7 @@ import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import type { FeatureCollection } from 'geojson'
 import { geojsonToBikeLanes } from '~/domain/mappers/osm-to-domain'
+import { approxMeters } from '~/domain/routing/algorithms'
 import { findRoutes } from '~/domain/routing/route-finder'
 import { isRoundTrip } from '~/domain/entities/route'
 import type { BikeLane } from '~/domain/entities/bike-lane'
@@ -44,6 +45,20 @@ const BASE_PREFERENCES = {
 
 function hasOnlyValidSegmentTypes(route: Route): boolean {
   return route.segments.every(s => s.type === 'bike_lane' || s.type === 'gap')
+}
+
+function countDiscontinuities(routes: Route[]): number {
+  let count = 0
+  for (const route of routes) {
+    for (let i = 0; i < route.segments.length - 1; i++) {
+      const current = route.segments[i].geometry.coordinates
+      const next = route.segments[i + 1].geometry.coordinates
+      const end = current[current.length - 1]
+      const start = next[0]
+      if (approxMeters(end[0], end[1], start[0], start[1]) > 2) count++
+    }
+  }
+  return count
 }
 
 let lanes: BikeLane[]
@@ -98,6 +113,10 @@ describe('routing integration — Warsaw overpass data', () => {
         expect(r.bikeLaneDistanceMeters).toBeGreaterThan(0)
       })
     })
+
+    it('every route has continuous segment geometry', () => {
+      expect(countDiscontinuities(routes)).toBe(0)
+    })
   })
 
   describe('one-way routing', () => {
@@ -132,6 +151,10 @@ describe('routing integration — Warsaw overpass data', () => {
 
     it('route has at least one bike_lane segment', () => {
       expect(routes[0].bikeLaneDistanceMeters).toBeGreaterThan(0)
+    })
+
+    it('route has continuous segment geometry', () => {
+      expect(countDiscontinuities(routes)).toBe(0)
     })
   })
 })

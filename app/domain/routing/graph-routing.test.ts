@@ -3,7 +3,9 @@ import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { loadScenario } from './test-utils/graph-scenario'
 import { runWalks, runOneWay } from './route-finder'
-import { coordKey } from './algorithms'
+import { approxMeters, coordKey } from './algorithms'
+import { buildGraph } from './graph'
+import type { BikeLane } from '../entities/bike-lane'
 import type { Route } from '../entities/route'
 import type { RouteSegment } from '../entities/route'
 import type { Scenario, ScenarioExpect } from './test-utils/graph-scenario'
@@ -32,6 +34,19 @@ function runScenario(sc: Scenario): Route[] {
 }
 
 function check(routes: Route[], ex: ScenarioExpect, keyToName: Map<string, string>) {
+  for (const route of routes) {
+    for (let i = 0; i < route.segments.length - 1; i++) {
+      const current = route.segments[i].geometry.coordinates
+      const next = route.segments[i + 1].geometry.coordinates
+      const end = current[current.length - 1]
+      const start = next[0]
+      expect(
+        approxMeters(end[0], end[1], start[0], start[1]),
+        `route geometry is discontinuous between segments ${i} and ${i + 1}`,
+      ).toBeLessThanOrEqual(2)
+    }
+  }
+
   if (ex.minRoutes !== undefined) expect(routes.length).toBeGreaterThanOrEqual(ex.minRoutes)
 
   if (ex.maxRoutes !== undefined) expect(routes.length).toBeLessThanOrEqual(ex.maxRoutes)
@@ -132,5 +147,41 @@ describe('graph routing scenarios', () => {
   it('barrier-last-resort: the walk never takes the flagged gap while a clean one exists', () => {
     const sc = loadScenario(scenario('barrier-last-resort.dot'))
     check(runScenario(sc), sc.expect, sc.keyToName)
+  })
+})
+
+describe('segment orientation', () => {
+  it('uses snapped node identity when raw endpoints differ inside one grid cell', () => {
+    const sharedFirst: [number, number] = [21, 52.000004]
+    const sharedLast: [number, number] = [21, 52]
+    const west: [number, number] = [20.999, 52]
+    const east: [number, number] = [21.001, 52]
+    const lanes: BikeLane[] = [
+      {
+        id: 'west',
+        osmId: 'way/west',
+        laneType: 'cycleway',
+        tags: {},
+        geometry: { type: 'LineString', coordinates: [sharedFirst, west] },
+      },
+      {
+        id: 'east',
+        osmId: 'way/east',
+        laneType: 'cycleway',
+        tags: {},
+        geometry: { type: 'LineString', coordinates: [east, sharedLast] },
+      },
+    ]
+    const graph = buildGraph(lanes, 0)
+    const sharedKey = coordKey(sharedFirst[0], sharedFirst[1])
+    const departures = [coordKey(east[0], east[1]), sharedKey]
+    const [route] = runOneWay(graph, departures[0], coordKey(west[0], west[1]), 0, 1_000)
+
+    expect(route?.segments).toHaveLength(2)
+    route.segments.forEach((segment, index) => {
+      const start = segment.geometry.coordinates[0]
+      const node = graph.getNodeAttributes(departures[index])
+      expect(approxMeters(start[0], start[1], node.lon, node.lat)).toBeLessThanOrEqual(2)
+    })
   })
 })

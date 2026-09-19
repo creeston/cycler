@@ -226,6 +226,8 @@ function buildGraphUnpruned(lanes: BikeLane[], maxGapMeters: number): BikeLaneGr
       if (distanceMeters > maxGapMeters) continue
       if (!shareLevel(levels.get(nodes[i]), levels.get(nodes[j]))) continue
       graph.addEdge(nodes[i], nodes[j], {
+        startKey: nodes[i],
+        endKey: nodes[j],
         distanceMeters,
         costMeters: distanceMeters,
         isGap: true,

@@ -77,6 +77,8 @@ export function loadScenario(filePath: string): Scenario {
       (isGap ? gapPenaltyFactor(distanceMeters, DEFAULT_PREFERENCES.maxGapMeters) : 1) *
       (barrier ? BARRIER_COST_MULTIPLIER : 1)
     graph.mergeEdge(edge.from, edge.to, {
+      startKey: edge.from,
+      endKey: edge.to,
       distanceMeters,
       costMeters: distanceMeters * penalty,
       isGap,
