@@ -45,8 +45,8 @@ export interface BarrierIndex {
 
 /**
  * Buckets barrier and crossing geometry into a uniform grid so a candidate gap
- * is only tested against the segments near it. Task 16 will replace this with
- * one shared index; until then the barrier test owns its own.
+ * is only tested against the segments near it. Segments span cells, so this
+ * stays separate from the point index in spatial-index.ts.
  */
 export function buildBarrierIndex(data: BarrierData): BarrierIndex {
   const barrierCells = new Map<string, BarrierSegment[]>()

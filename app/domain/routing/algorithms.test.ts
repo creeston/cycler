@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { coordKey } from './algorithms'
+import { METERS_PER_DEGREE, coordKey } from './algorithms'
 import {
   BARRIER_COST_MULTIPLIER,
   GAP_PENALTY_FACTOR,
@@ -425,6 +425,25 @@ describe('nearestNode', () => {
   it('returns null for an empty graph', () => {
     const g = buildGraph([], 0)
     expect(nearestNode(g, 0, 0)).toBeNull()
+  })
+
+  it('measures in metres, not degrees: 90 m east beats 100 m north at 52° N', () => {
+    // A degree of longitude is cos(52°) ≈ 0.62 of a degree of latitude on the
+    // ground, so comparing raw degree deltas would rank the northern node first.
+    const east = 90 / (METERS_PER_DEGREE * Math.cos((52 * Math.PI) / 180))
+    const north = 100 / METERS_PER_DEGREE
+    const lanes = [
+      makeLane('n', [
+        [21, 52 + north],
+        [21, 53],
+      ]),
+      makeLane('e', [
+        [21 + east, 52],
+        [22, 52],
+      ]),
+    ]
+    const g = buildGraph(lanes, 0)
+    expect(nearestNode(g, 21, 52)).toBe(coordKey(21 + east, 52))
   })
 })
 

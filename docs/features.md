@@ -134,9 +134,11 @@ journey
 ```
 
 The two low-scoring steps are both waits, and both are the same underlying cost: a network
-round-trip to Overpass with no progress indication beyond a spinner, and a synchronous `O(N²)`
-graph build that blocks the main thread ([`16`](../backlog/16-spatial-index.md),
-[`17`](../backlog/17-web-worker.md), [`18`](../backlog/18-overpass-resilience.md)).
+round-trip to Overpass with no progress indication beyond a spinner, and a synchronous graph
+build on the main thread — 71 ms for a 10 000-node city since
+[`16`](../backlog/done/16-spatial-index.md), still on the UI thread until
+[`17`](../backlog/17-web-worker.md) ([`18`](../backlog/18-overpass-resilience.md) covers the
+network side).
 
 ---
 

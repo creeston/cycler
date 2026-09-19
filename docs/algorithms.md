@@ -87,8 +87,8 @@ three, so it is called once per lane and never in an inner loop.
 
 ### 2.2 Gap distance — equirectangular approximation
 
-Gap detection compares every pair of nodes (§3), so it needs a cheap metric. `approxMeters`
-projects the pair onto a local tangent plane:
+Gap detection tests every node pair the spatial index brings together (§3.4), so it needs a
+cheap metric. `approxMeters` projects the pair onto a local tangent plane:
 
 $$
 d \approx R\sqrt{(\Delta\varphi)^2 + \left(\Delta\lambda \cdot \cos\varphi_m\right)^2},
@@ -100,19 +100,15 @@ with all angles in radians and `R = 6 371 000 m`. No trigonometric inverse, one 
 0.1 %, and gap distances are two to three orders of magnitude smaller than that. For this use
 the approximation is effectively exact.
 
-### 2.3 Nearest node — squared degrees
+### 2.3 Nearest node — the same approximation
 
-`nearestNode` minimises
-
-$$
-(\lambda_a - \lambda)^2 + (\varphi_a - \varphi)^2
-$$
-
-in **degrees**, with no `cos φ` correction. Because one degree of longitude is `cos φ` times
-shorter than one degree of latitude, this over-weights east–west displacement by a factor of
-`1/cos φ` — **1.62× at 52° N**. Given two nodes at equal true distance, one due north and one
-due east, the function prefers the northern one. It is therefore only approximately "nearest".
-Tracked as [`13-nearest-node-metric`](../backlog/13-nearest-node-metric.md).
+`nearestNode` and `nodesWithinMeters` both query the node index (§3.4) and both rank by
+`approxMeters`, so they cannot disagree about which node is nearest. Until
+[`16`](../backlog/done/16-spatial-index.md) `nearestNode` compared squared degree deltas with no
+`cos φ` correction, which over-weighted east–west displacement by `1/cos φ` — 1.62× at 52° N —
+and on the Warsaw fixture picked a different node for 46 of 200 probe points near lane
+endpoints. [`13`](../backlog/13-nearest-node-metric.md) keeps what is left of that task: a
+return value that says how far the snap was.
 
 ---
 
@@ -188,8 +184,9 @@ connect, and keeps 6.
 
 ### 3.3 Gap edges
 
-When `maxGapMeters > 0`, every unordered pair of distinct nodes not already joined by a lane
-edge is tested. A pair that passes becomes a **candidate**:
+When `maxGapMeters > 0`, every unordered pair of distinct nodes within `g` of each other that
+no lane edge already joins becomes a **candidate**. The pairs come from the spatial index
+(§3.4); the acceptance test is the distance itself:
 
 $$
 (u,v) \in C_{\text{gap}} \iff \text{approxMeters}(u,v) \le g
@@ -484,55 +481,76 @@ loops fall from 58.2 to 31.3 at 200 m, coverage rises to 89.7 %, and barrier cro
 It is a good trade on these numbers, and it waits on the on-the-ground check that
 [`28`](../backlog/done/28-barrier-veto.md) left open.
 
-### 3.4 The bounding-box prefilter
+### 3.4 The spatial index
 
-The pair loop is `O(|V|²)`. To keep the constant small, a rectangular prefilter rejects pairs
-before the distance call:
+Candidate pairs are found through a uniform grid over the nodes (`spatial-index.ts`), built once
+per `buildGraph` and stored on the graph for `nearestNode` and `nodesWithinMeters` (§4) to reuse.
+The cell is `g` metres tall and at least `g` metres wide everywhere the nodes are, so two nodes
+within `g` of each other are never more than one cell apart and every cell is compared with
+itself and its eight neighbours only.
 
 ```
-maxDeg = (g / 111000) * 1.5
-skip if |Δφ| > maxDeg  or  |Δλ| > 2·maxDeg
+cellLatDeg = g / M                      M = R · π / 180, the metres per degree approxMeters uses
+cellLonDeg = cellLatDeg / cos φ_max     φ_max = the largest |latitude| in the node set
 ```
 
-**Is the prefilter safe?** A prefilter must never reject a pair that is genuinely within `g`.
+**Is the index exact?** It must never separate a pair that is genuinely within `g`.
 
-- *Latitude.* The threshold `1.5g/111000` degrees corresponds to `1.5 · (111320/111000) · g ≈ 1.504 g`
-  meters. Always larger than `g`. Safe everywhere.
-- *Longitude.* The threshold `3g/111000` degrees corresponds to `3 · 1.00288 · g · cos φ` meters.
-  This is `≥ g` only while
+- *Latitude.* `approxMeters ≤ g` implies `|Δφ| ≤ g / M = cellLatDeg`, so the rows differ by at
+  most one. The cell is sized with the same `M` as the distance function, and widened by
+  `1 + 10⁻⁶` so a pair whose distance rounds to exactly `g` still lands in adjacent cells.
+- *Longitude.* `approxMeters ≤ g` implies `|Δλ| · cos φ_m ≤ g / M`, and `cos φ_m ≥ cos φ_max`
+  because both nodes lie inside the set's latitude range. So `|Δλ| ≤ cellLonDeg` and the columns
+  differ by at most one, at any latitude short of the pole itself.
 
-$$
-\cos\varphi \ \ge\ \frac{1}{3 \cdot 1.00288} \approx 0.3324
-\quad\Longleftrightarrow\quad
-|\varphi| \le 70.6°
-$$
+The rectangular prefilter this replaced used a fixed `3 g / 111 000°` longitude window, which is
+narrower than `g` once `cos φ < 1 / (3 · 1.00288)`, i.e. above **70.6°** — it silently dropped
+valid pairs in northern Norway. Sizing the column from `φ_max` removes that limit rather than
+widening it.
 
-So the prefilter is conservative for every populated cycling city on Earth, and starts silently
-dropping valid gap pairs above roughly **70.6° latitude** (northern Norway, Svalbard, northern
-Siberia). Worth knowing; not worth fixing before someone routes a bike in Tromsø.
+Cell width follows the most poleward node, so in a set spanning a wide latitude range the cells
+nearer the equator are wider than `g` and hold a few more false candidates; the acceptance test
+discards them and the result is unchanged. For a 50 km box the difference is under 1 %.
+
+Radius queries (`pointsWithin`) scan the `⌈r / g⌉` rings of cells around the query, with the
+longitude reach computed from `cos` at the query or at `φ_max`, whichever is smaller. The
+nearest query scans square rings outward and stops once the best distance found is no more than
+`(ring − 1)` cells, in metres, so no unscanned cell can hold a closer node.
 
 ### 3.5 Complexity
 
-Let `L` = lane count, `P` = total polyline vertices, `N = |V| ≤ P`.
+Let `L` = lane count, `P` = total polyline vertices, `N = |V| ≤ P`, `C` = candidate pairs.
 
 | Phase | Cost |
 |---|---|
 | Junction detection (`coordKey` per vertex, one count per key) | `O(P)` |
 | Lane ingestion + `turf.length` | `O(P)` |
-| Candidate detection | `O(N²)` prefilter tests, `O(p·N²)` distance calls where `p` is the pass rate |
+| Node index | `O(N)` |
+| Candidate detection | `O(N · k)` distance calls, `k` = nodes in the nine cells around a node |
 | Lane components (union-find) | `O(N α(N))` |
-| Candidate selection | `O(C log C)` for `C` candidates |
+| Candidate selection | `O(C log C)` |
 | Barrier index | `O(B)` for `B` barrier segments |
 | Barrier tests | `O(K · b)` for `K` kept gaps and `b` segments per grid cell |
-| Total | **`O(N²)`** |
+| Total | **`O(N · k + C log C)`** — linear in `N` at fixed density |
 
-Pruning does not change the asymptotics — finding candidate pairs still dominates — but it removes
-about 80 % of the edge insertion, memory and traversal cost that follows.
+`k` is set by the node density and the tolerance, not by the size of the fetch: at 200 m over a
+city the nine cells hold a few dozen nodes. `C` grows with `g²` and is what the 1 000 m fallback
+pass pays for.
 
-A dense city fetch of ~5 000 lanes gives `N ≈ 8 000` and ~32 M pair tests, executed
-synchronously on the main thread. This is the app's dominant cost and the reason "Suggest Route"
-can visibly stall. Addressed by [`16-spatial-index`](../backlog/16-spatial-index.md) (grid or
-R-tree, expected `O(N log N)`) and [`17-web-worker`](../backlog/17-web-worker.md).
+Measured by `npm run bench` (`app/integration/graph-build.bench.ts`), median of five builds:
+
+| Set | `g` | Nodes | Pair loop | Index |
+|---|---|---|---|---|
+| Warsaw fixture | 200 m | 360 | 6 ms | 5 ms |
+| Warsaw fixture | 1 000 m | 360 | 8 ms | 7 ms |
+| Synthetic city, 20 × 20 km | 200 m | 10 000 | 1 736 ms | **71 ms** |
+| Synthetic city, 20 × 20 km | 1 000 m | 10 000 | 2 090 ms | **346 ms** |
+
+Doubling the node count from 1 000 to 8 000 (three doublings) multiplied the pair loop's time by
+60 and the index's by 13.5; `graph-build.test.ts` asserts the ratio stays under 32. At 1 000 m
+the remaining cost is the 380 000 candidates the synthetic set produces — every lane there is
+isolated, so nothing is dropped as same-component before the sort — and not the search. What is
+left of the stall is [`17-web-worker`](../backlog/17-web-worker.md).
 
 ---
 
@@ -544,8 +562,9 @@ $$
 S = \{\, u \in V : \text{approxMeters}(u, (\lambda,\varphi)) \le r \,\}
 $$
 
-using the same prefilter as §3.4, with `r = startProximityMeters` (default 200 m). When `S = ∅`
-it falls back to `{ nearestNode(G, λ, φ) }`, so `S` is non-empty for any non-empty graph.
+through the node index (§3.4), with `r = startProximityMeters` (default 200 m), in node order.
+When `S = ∅` it falls back to `{ nearestNode(G, λ, φ) }`, so `S` is non-empty for any non-empty
+graph.
 
 The routing strategy is then run independently from **every** `u ∈ S`. Standing at a junction of
 four bike paths therefore produces four families of routes rather than one — the single biggest
@@ -839,12 +858,16 @@ Three layers, deliberately separated:
   connected-component count at four tolerances, adds no gap inside a lane component, and still
   yields many distinct routes. `barrier-veto.test.ts` adds `overpass-barriers.geojson` — the
   barrier layer for the same bounding box — and pins the veto rate, the share of intersections
-  that crossings excuse, and that marking never disconnects the graph.
+  that crossings excuse, and that marking never disconnects the graph. `graph-build.test.ts`
+  pins the graph the spatial index produces to the one the exhaustive pair loop produced — node
+  and edge counts and a hash of the edge list at five tolerances — and asserts the build scales
+  sub-quadratically. `spatial-index.test.ts` checks the index against brute force at 0°, 52°,
+  75° and 85° latitude.
 
 Each `.dot` file opens with an ASCII sketch of the graph it encodes, which makes the fixtures
 reviewable without running them.
 
-**Current coverage: 142 tests, all passing.** The gaps are above the domain line — no tests for
+**Current coverage: 197 tests, all passing.** The gaps are above the domain line — no tests for
 the stores, hooks, Overpass client, IndexedDB cache or GPX writer
 ([`22-use-case-tests`](../backlog/22-use-case-tests.md)).
 
@@ -865,9 +888,10 @@ Every tuning constant in the routing path, in one place.
 | `CROSSING_TOLERANCE_METERS` | 20 m | `barriers.ts` | How near a crossing must be to excuse an intersection |
 | `CROSSING_ON_BARRIER_METERS` | 5 m | `barriers.ts` | How near that crossing must be to the barrier itself |
 | barrier index cell | 0.002° | `barriers.ts` | ≈ 220 m grid over barrier segments |
-| `R` | 6 371 000 m | `graph.ts` | Earth radius for `approxMeters` |
+| node index cell | `maxGapMeters` | `graph.ts` | Grid cell for gap detection; `INDEX_CELL_METERS_WITHOUT_GAPS` = 200 m when no gaps are built |
+| `CELL_MARGIN` | 10⁻⁶ | `spatial-index.ts` | Cell widening against rounding at exactly the tolerance |
+| `METERS_PER_DEGREE` | 111 195 m | `algorithms.ts` | `R · π / 180` with `R` = 6 371 000 m; shared by `approxMeters` and the index |
 | snapping precision | 5 decimals | `algorithms.ts` | ≈ 1.11 m × 0.69 m cell at 52° N |
-| prefilter factor | 1.5 (lat), 3.0 (lon) | `graph.ts` | Bounding-box safety margin |
 | `maxGapMeters` | 200 m | `DEFAULT_PREFERENCES` | User-facing gap tolerance; slider range 0–500 m |
 | `startProximityMeters` | 200 m | `DEFAULT_PREFERENCES` | Start candidate radius |
 | `minDistanceMeters` | 10 000 m | `DEFAULT_PREFERENCES` | Target range floor |

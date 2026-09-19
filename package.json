@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "bench": "vitest run --config vitest.bench.config.ts --reporter=verbose",
     "security:check": "npm audit --audit-level=high",
     "security:signatures": "npm audit signatures",
     "lint": "eslint .",

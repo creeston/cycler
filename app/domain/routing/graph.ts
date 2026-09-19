@@ -3,8 +3,10 @@ import * as turf from '@turf/turf'
 import type { LineString, Position } from 'geojson'
 import type { BikeLane, LaneType } from '../entities/bike-lane'
 import type { BarrierData, BarrierKind } from '../entities/barrier'
-import { approxMeters, coordKey } from './algorithms'
+import { coordKey } from './algorithms'
 import { buildBarrierIndex, findBlockingBarrier } from './barriers'
+import { buildPointIndex, forEachPairWithin, nearestPoint, pointsWithin } from './spatial-index'
+import type { PointIndex } from './spatial-index'
 import { osmLevel } from '../mappers/osm-to-barriers'
 
 export interface NodeAttrs {
@@ -51,10 +53,18 @@ export interface GapStats {
   barriersChecked: boolean
 }
 
+/** The graph's nodes in a spatial index; `keys[i]` is the node at point i. */
+export interface NodeIndex {
+  keys: string[]
+  points: PointIndex
+}
+
 export interface GraphAttrs {
   gapStats?: GapStats
   /** The gap tolerance this graph was built with. */
   maxGapMeters?: number
+  /** Built once by buildGraph, after which the node set does not change. */
+  nodeIndex?: NodeIndex
 }
 
 export type BikeLaneGraph = Graph<NodeAttrs, EdgeAttrs, GraphAttrs>
@@ -69,6 +79,13 @@ export type BikeLaneGraph = Graph<NodeAttrs, EdgeAttrs, GraphAttrs>
  * that costs nothing. See docs/algorithms.md §3.3.2.
  */
 export const MAX_GAP_EDGES_PER_NODE = 2
+
+/**
+ * Index cell size when the graph is built without gaps, so nearestNode and
+ * nodesWithinMeters still have an index to query. With gaps the cell is the
+ * gap tolerance itself, which makes the gap pass a nine-cell lookup.
+ */
+const INDEX_CELL_METERS_WITHOUT_GAPS = 200
 
 const EMPTY_GAP_STATS: GapStats = {
   candidates: 0,
@@ -278,31 +295,39 @@ function sharesLevel(a: Set<number> | undefined, b: Set<number> | undefined): bo
 }
 
 /**
- * Every unordered pair of nodes within maxGapMeters that no lane edge already joins.
- * A rectangular prefilter rejects distant pairs before the distance call; it is
- * conservative up to ~70.6° latitude (docs/algorithms.md §3.4).
+ * Every unordered pair of nodes within maxGapMeters that no lane edge already
+ * joins, found through the spatial index (docs/algorithms.md §3.4). The
+ * distance test is the same approxMeters comparison as before the index, so
+ * the candidate set is exactly the set of pairs within the tolerance.
  */
 function collectGapCandidates(
   graph: BikeLaneGraph,
-  nodes: string[],
-  attrs: NodeAttrs[],
+  index: NodeIndex,
   maxGapMeters: number,
 ): GapCandidate[] {
   const candidates: GapCandidate[] = []
-  const maxDeg = (maxGapMeters / 111_000) * 1.5
-
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      if (graph.hasEdge(nodes[i], nodes[j])) continue
-      const a = attrs[i],
-        b = attrs[j]
-      if (Math.abs(a.lat - b.lat) > maxDeg || Math.abs(a.lon - b.lon) > maxDeg * 2) continue
-      const distanceMeters = approxMeters(a.lon, a.lat, b.lon, b.lat)
-      if (distanceMeters <= maxGapMeters) candidates.push({ from: i, to: j, distanceMeters })
-    }
-  }
-
+  forEachPairWithin(index.points, maxGapMeters, (from, to, distanceMeters) => {
+    if (graph.hasEdge(index.keys[from], index.keys[to])) return
+    candidates.push({ from, to, distanceMeters })
+  })
   return candidates
+}
+
+function buildNodeIndex(graph: BikeLaneGraph, cellMeters: number): NodeIndex {
+  const keys = graph.nodes()
+  const lons = new Array<number>(keys.length)
+  const lats = new Array<number>(keys.length)
+  keys.forEach((key, i) => {
+    const attrs = graph.getNodeAttributes(key)
+    lons[i] = attrs.lon
+    lats[i] = attrs.lat
+  })
+  return { keys, points: buildPointIndex(lons, lats, cellMeters) }
+}
+
+/** The index buildGraph stored, or a fresh one for a graph assembled some other way. */
+function nodeIndexOf(graph: BikeLaneGraph): NodeIndex {
+  return graph.getAttribute('nodeIndex') ?? buildNodeIndex(graph, INDEX_CELL_METERS_WITHOUT_GAPS)
 }
 
 /** Union-find parents for the components formed by lane edges alone. */
@@ -322,7 +347,8 @@ function laneComponents(
 }
 
 /**
- * Picks which candidates become gap edges, shortest first:
+ * Picks which candidates become gap edges, shortest first (ties by node
+ * order, so the result does not depend on how the candidates were found):
  *
  * 1. Drop candidates whose endpoints lane edges already connect — they cannot
  *    change reachability.
@@ -346,7 +372,9 @@ function selectGapEdges(
   const crossComponent = candidates.filter(
     c => findRoot(laneParent, c.from) !== findRoot(laneParent, c.to),
   )
-  crossComponent.sort((a, b) => a.distanceMeters - b.distanceMeters)
+  crossComponent.sort(
+    (a, b) => a.distanceMeters - b.distanceMeters || a.from - b.from || a.to - b.to,
+  )
 
   const gapDegree = new Array<number>(nodeCount).fill(0)
   const keptFlags = new Array<boolean>(crossComponent.length).fill(false)
@@ -382,17 +410,17 @@ function selectGapEdges(
 
 function addGapEdges(
   graph: BikeLaneGraph,
+  index: NodeIndex,
   maxGapMeters: number,
   maxGapsPerNode: number,
   levels: Map<string, Set<number>>,
   barriers: BarrierData | undefined,
   gapPenalty: (distanceMeters: number, maxGapMeters: number) => number,
 ): GapStats {
-  const nodes = graph.nodes()
-  // Pre-compute to avoid repeated attribute lookups in the inner loop
-  const attrs = nodes.map(k => graph.getNodeAttributes(k))
+  const nodes = index.keys
+  const { lons, lats } = index.points
 
-  const candidates = collectGapCandidates(graph, nodes, attrs, maxGapMeters)
+  const candidates = collectGapCandidates(graph, index, maxGapMeters)
   const onGrade = candidates.filter(c =>
     sharesLevel(levels.get(nodes[c.from]), levels.get(nodes[c.to])),
   )
@@ -400,13 +428,15 @@ function addGapEdges(
   const { selected, droppedSameComponent, droppedBeyondLimit, keptForConnectivity } =
     selectGapEdges(onGrade, nodes.length, parent, rank, maxGapsPerNode)
 
-  const index = barriers ? buildBarrierIndex(barriers) : null
+  const barrierIndex = barriers ? buildBarrierIndex(barriers) : null
   let barrierCrossings = 0
 
   for (const c of selected) {
-    const a = attrs[c.from],
-      b = attrs[c.to]
-    const barrier = index ? findBlockingBarrier(index, a.lon, a.lat, b.lon, b.lat) : null
+    const aLon = lons[c.from],
+      aLat = lats[c.from],
+      bLon = lons[c.to],
+      bLat = lats[c.to]
+    const barrier = barrierIndex ? findBlockingBarrier(barrierIndex, aLon, aLat, bLon, bLat) : null
     if (barrier) barrierCrossings++
 
     const penalty =
@@ -422,8 +452,8 @@ function addGapEdges(
       geometry: {
         type: 'LineString',
         coordinates: [
-          [a.lon, a.lat],
-          [b.lon, b.lat],
+          [aLon, aLat],
+          [bLon, bLat],
         ],
       },
     })
@@ -437,7 +467,7 @@ function addGapEdges(
     droppedBeyondLimit,
     keptForConnectivity,
     barrierCrossings,
-    barriersChecked: index !== null,
+    barriersChecked: barrierIndex !== null,
   }
 }
 
@@ -470,7 +500,9 @@ export interface GraphOptions {
  * and survivors that cross a barrier away from a crossing are marked and made
  * expensive rather than removed. Every gap edge costs more to the router than
  * its length (gapPenaltyFactor); `distanceMeters` stays the real distance.
- * Counts are stored as the graph attribute `gapStats` and read with getGapStats.
+ * Counts are stored as the graph attribute `gapStats` and read with getGapStats;
+ * the node index that found the pairs is stored as `nodeIndex` for the
+ * queries below.
  */
 export function buildGraph(
   lanes: BikeLane[],
@@ -480,11 +512,16 @@ export function buildGraph(
   const graph: BikeLaneGraph = new Graph({ type: 'undirected', multi: false })
 
   const levels = addLaneEdges(graph, lanes)
+  const index = buildNodeIndex(
+    graph,
+    maxGapMeters > 0 ? maxGapMeters : INDEX_CELL_METERS_WITHOUT_GAPS,
+  )
 
   const stats =
     maxGapMeters > 0
       ? addGapEdges(
           graph,
+          index,
           maxGapMeters,
           options.maxGapsPerNode ?? MAX_GAP_EDGES_PER_NODE,
           levels,
@@ -494,6 +531,7 @@ export function buildGraph(
       : EMPTY_GAP_STATS
   graph.setAttribute('gapStats', stats)
   graph.setAttribute('maxGapMeters', maxGapMeters)
+  graph.setAttribute('nodeIndex', index)
 
   return graph
 }
@@ -508,25 +546,23 @@ export function getGapStats(graph: BikeLaneGraph): GapStats {
   return graph.getAttribute('gapStats') ?? EMPTY_GAP_STATS
 }
 
-/** Returns the key of the graph node closest to the given coordinate. */
+/**
+ * Returns the key of the graph node closest to the given coordinate, or null
+ * for an empty graph. Distance is approxMeters through the node index, the
+ * same measure nodesWithinMeters uses, so the two cannot disagree about
+ * which node is nearest.
+ */
 export function nearestNode(graph: BikeLaneGraph, lon: number, lat: number): string | null {
-  let minSq = Infinity
-  let nearest: string | null = null
-  graph.forEachNode((key, a) => {
-    const sq = (a.lon - lon) ** 2 + (a.lat - lat) ** 2
-    if (sq < minSq) {
-      minSq = sq
-      nearest = key
-    }
-  })
-  return nearest
+  const index = nodeIndexOf(graph)
+  const nearest = nearestPoint(index.points, lon, lat)
+  return nearest ? index.keys[nearest.index] : null
 }
 
 /**
- * Returns keys of all graph nodes within maxMeters of the given coordinate.
- * Uses the same equirectangular approximation as gap detection.
- * Falls back to the single nearest node when none are within the radius,
- * so the result is never empty as long as the graph has at least one node.
+ * Returns keys of all graph nodes within maxMeters of the given coordinate,
+ * in node order. Falls back to the single nearest node when none are within
+ * the radius, so the result is never empty as long as the graph has at least
+ * one node.
  */
 export function nodesWithinMeters(
   graph: BikeLaneGraph,
@@ -534,17 +570,12 @@ export function nodesWithinMeters(
   lat: number,
   maxMeters: number,
 ): string[] {
-  const maxDeg = (maxMeters / 111_000) * 1.5
-  const candidates: string[] = []
-
-  graph.forEachNode((key, a) => {
-    if (Math.abs(a.lat - lat) > maxDeg || Math.abs(a.lon - lon) > maxDeg * 2) return
-    if (approxMeters(lon, lat, a.lon, a.lat) <= maxMeters) candidates.push(key)
-  })
+  const index = nodeIndexOf(graph)
+  const candidates = pointsWithin(index.points, lon, lat, maxMeters).map(i => index.keys[i])
 
   if (candidates.length === 0) {
-    const nearest = nearestNode(graph, lon, lat)
-    if (nearest) candidates.push(nearest)
+    const nearest = nearestPoint(index.points, lon, lat)
+    if (nearest) candidates.push(index.keys[nearest.index])
   }
 
   return candidates

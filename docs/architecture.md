@@ -86,7 +86,7 @@ graph TD
 
 | Layer | Modules | Depends on |
 |---|---|---|
-| `domain` | `entities/` (BikeLane, Barrier, Route, RoutePreferences, CachedArea) · `routing/` (graph, route-finder, algorithms, barriers) · `mappers/` (osm-to-domain, osm-to-barriers, geojson-from-domain) | nothing in-app; only `geojson` types, `graphology`, `@turf/turf` |
+| `domain` | `entities/` (BikeLane, Barrier, Route, RoutePreferences, CachedArea) · `routing/` (graph, spatial-index, route-finder, algorithms, barriers) · `mappers/` (osm-to-domain, osm-to-barriers, geojson-from-domain) | nothing in-app; only `geojson` types, `graphology`, `@turf/turf` |
 | `infrastructure` | `osm/` (overpass-client, queries) · `cache/` (db, area-cache) · `export/` (gpx) | `domain/entities` |
 | `application` | `use-cases/` (fetchArea, buildRoute) · `stores/` (map-store, routing-store) | `domain`, `infrastructure` |
 | `presentation` | `components/map` · `components/layout` · `components/ui` · `hooks/` | `application`, plus domain types and view mappers |
@@ -325,7 +325,7 @@ Each is a task in [`/backlog`](../backlog/README.md).
 |---|---|---|
 | Gap edges are unweighted; tolerance is silently widened | The core bike-lane-first guarantee is not enforced | [01](../backlog/done/01-gap-penalty-and-tolerance.md) |
 | Graph nodes exist only where lanes **share a vertex** | Lanes that cross without a shared OSM node are not connected | follow-up of [09](../backlog/done/09-mid-lane-junctions.md) |
-| Gap detection is O(n²) over all nodes | City-scale fetches block the main thread for seconds | [16](../backlog/16-spatial-index.md), [17](../backlog/17-web-worker.md) |
+| The graph is built synchronously on the main thread | A 10 000-node city costs ~70 ms per Suggest Route, ~350 ms on the 1 000 m fallback, with the map frozen meanwhile | [17](../backlog/17-web-worker.md) |
 | Distance preferences have no UI | Distance configuration is unreachable | [05](../backlog/05-route-preferences-ui.md) |
 | Overpass has one endpoint, no retry, no abort | A 429 or 504 surfaces as a raw error and loses the request | [18](../backlog/18-overpass-resilience.md) |
 | IndexedDB cache is bypassed on every fetch | Every button press re-queries Overpass | [19](../backlog/19-cache-bypassed-on-fetch.md) |
