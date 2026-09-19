@@ -5,7 +5,8 @@ and — most importantly — **how route-finding algorithms are developed here**
 scenario-first and non-negotiable.
 
 Written for humans and for AI agents. If you are an agent picking up a task from
-[`/backlog`](../backlog/README.md), read §4 before touching anything under `app/domain/routing/`.
+[`/backlog`](../backlog/README.md), read §4 before touching anything under `app/domain/routing/`
+and §7 before writing a commit message.
 
 Companion documents: [Architecture](architecture.md) · [Algorithms](algorithms.md) ·
 [Features & use cases](features.md)
@@ -303,7 +304,7 @@ the rest are gaps in the current suite and are worth adding as you go.
 - ⬜ A route composed entirely of gaps — `bikeLaneCoverage === 0`
 - ⬜ Two consecutive gap edges (`gapCount` counts edges, not crossings)
 - ⬜ A shorter gap route against a slightly longer all-lane route — the all-lane route must win
-  once [01](../backlog/01-gap-penalty-and-tolerance.md) lands
+  once [01](../backlog/done/01-gap-penalty-and-tolerance.md) lands
 - ⬜ Zero gap tolerance
 
 **Start and end**
@@ -421,3 +422,36 @@ Then confirm:
 - If you changed a documented constant, limit or guarantee,
   [`docs/algorithms.md`](algorithms.md) §10 and [`docs/architecture.md`](architecture.md) still
   agree with the code.
+- The commit message follows §7.
+
+---
+
+## 7. Commit messages
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
+
+```
+<type>(<scope>): <summary>
+
+<body>
+```
+
+- **`type`** is one of `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `build`, `ci`, `chore`.
+- **`scope`** is optional. When used, it names the part of the app that changed: a domain
+  module (`routing`, `graph`, `gaps`), a layer (`ui`, `cache`, `osm`, `export`), or `docs`,
+  `backlog`, `deps`.
+- **`summary`** is imperative, lower-case, without a trailing full stop, and fits in 72 columns.
+- **`body`** is optional. Use it to say *why* the change was made when the diff does not make it
+  obvious. Reference the backlog item when there is one, e.g. `Closes backlog/28`.
+- A change that breaks a documented guarantee, a persisted store shape or a cache key adds `!`
+  after the scope and a `BREAKING CHANGE:` footer.
+
+Examples:
+
+```
+fix(routing): orient segments by snapped node identity
+feat(ui): implement slider for gap tolerance
+docs: restructure documentation
+```
+
+One commit does one thing. If the summary needs "and", split the commit.
