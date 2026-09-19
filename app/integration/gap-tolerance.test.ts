@@ -3,7 +3,7 @@
  * Warsaw Bemowo export: a returned route either respects the tolerance, or
  * says on its face that it was widened and by how much.
  */
-import { describe, it, expect, beforeAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
@@ -39,15 +39,9 @@ beforeAll(() => {
   )
 })
 
-const realRandom = Math.random
-afterEach(() => {
-  Math.random = realRandom
-})
-
 describe('gap tolerance — Warsaw overpass data', () => {
   it.each([50, 100, 200])('returns no gap longer than the %i m the rider asked for', tolerance => {
-    Math.random = mulberry32(7)
-    const routes = findRoutes(lanes, { ...BASE_PREFERENCES, maxGapMeters: tolerance }, barriers)
+    const routes = findRoutes(lanes, { ...BASE_PREFERENCES, maxGapMeters: tolerance }, { barriers })
 
     expect(routes.length).toBeGreaterThan(0)
     for (const route of routes) {
@@ -60,11 +54,10 @@ describe('gap tolerance — Warsaw overpass data', () => {
   })
 
   it('holds the tolerance for round trips too', () => {
-    Math.random = mulberry32(11)
     const routes = findRoutes(
       lanes,
       { ...BASE_PREFERENCES, maxGapMeters: 100, roundTrip: true },
-      barriers,
+      { barriers },
     )
 
     expect(routes.length).toBeGreaterThan(0)
@@ -72,13 +65,13 @@ describe('gap tolerance — Warsaw overpass data', () => {
   })
 
   it('says on the route when it had to widen the tolerance to find anything', () => {
-    Math.random = mulberry32(3)
-    // A 5 m tolerance bridges almost nothing, and a loop has to come back, so
-    // the fixture cannot close one without the fallback.
+    // A 5 m tolerance bridges almost nothing, and the lane graph alone has no
+    // loop of 8 km or more from here, so the fixture cannot close one without
+    // the fallback.
     const routes = findRoutes(
       lanes,
-      { ...BASE_PREFERENCES, maxGapMeters: 5, roundTrip: true },
-      barriers,
+      { ...BASE_PREFERENCES, maxGapMeters: 5, minDistanceMeters: 8_000, roundTrip: true },
+      { barriers },
     )
 
     expect(routes.length).toBeGreaterThan(0)
@@ -91,18 +84,17 @@ describe('gap tolerance — Warsaw overpass data', () => {
   })
 
   it('leaves the tolerance alone when the request can be met', () => {
-    Math.random = mulberry32(5)
-    const routes = findRoutes(lanes, { ...BASE_PREFERENCES, maxGapMeters: 200 }, barriers)
+    const routes = findRoutes(lanes, { ...BASE_PREFERENCES, maxGapMeters: 200 }, { barriers })
 
     expect(routes.length).toBeGreaterThan(0)
     routes.forEach(route => expect(wasGapToleranceWidened(route)).toBe(false))
   })
 
   it('spends most of its distance on bike lanes', () => {
-    Math.random = mulberry32(9)
-    const routes = findRoutes(lanes, { ...BASE_PREFERENCES, maxGapMeters: 200 }, barriers)
+    const routes = findRoutes(lanes, { ...BASE_PREFERENCES, maxGapMeters: 200 }, { barriers })
 
-    // Measured at 88.8 % mean coverage over 10 seeds; the floor guards a collapse.
+    // Measured at 100 % mean coverage: from here every route in range stays on
+    // lanes. The floor guards a collapse.
     expect(meanCoverage(routes)).toBeGreaterThan(0.8)
   })
 })
@@ -110,16 +102,4 @@ describe('gap tolerance — Warsaw overpass data', () => {
 function meanCoverage(routes: Route[]): number {
   if (routes.length === 0) return 0
   return routes.reduce((sum, route) => sum + route.bikeLaneCoverage, 0) / routes.length
-}
-
-/** Deterministic PRNG so route counts do not vary between runs. */
-function mulberry32(seed: number): () => number {
-  let a = seed
-  return () => {
-    a |= 0
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
 }

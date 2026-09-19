@@ -1,0 +1,24 @@
+// Round trip from A, whose only edge is the stick of a lollipop. Every way
+// back to A reuses A -- B, and a round trip may not traverse an edge twice, so
+// no loop exists. The router must say so rather than return an out-and-back.
+// minDist = 500 so the 600 m cycle B-C-D would be long enough on its own.
+//
+//   A --200m-- B --200m-- C
+//              |          |
+//              +--200m-- D
+//
+graph round_trip_lollipop {
+  graph [
+    description = "No loop when the only way home repeats an edge",
+    start = "A",
+    minDist = 500,
+    maxDist = 5000,
+    roundTrip = "true",
+    expect_maxRoutes = 0
+  ]
+
+  A -- B [distance=200, type=lane]
+  B -- C [distance=200, type=lane]
+  C -- D [distance=200, type=lane]
+  D -- B [distance=200, type=lane]
+}

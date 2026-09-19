@@ -16,7 +16,7 @@ graph round_trip {
     maxDist = 5000,
     roundTrip = "true",
     expect_isRoundTrip = "true",
-    expect_route = "A,B,C,D,A;A,D,C,B,A"
+    expect_any_route = "A,B,C,D,A;A,D,C,B,A"
   ]
 
   A -- B [distance=50, type=gap]

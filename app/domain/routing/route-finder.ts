@@ -1,16 +1,28 @@
 import type { LineString } from 'geojson'
-import dijkstra from 'graphology-shortest-path/dijkstra'
 import type { BikeLane } from '../entities/bike-lane'
 import type { BarrierData } from '../entities/barrier'
 import type { Route, RoutePreferences, RouteSegment } from '../entities/route'
 import { buildGraph, getGapStats, getMaxGapMeters, nearestNode, nodesWithinMeters } from './graph'
 import type { BikeLaneGraph, EdgeAttrs } from './graph'
 import { longestGapMeters } from '../entities/route'
+import { bearingDegrees, destinationPoint } from './algorithms'
+import { seededRandom } from './random'
+import { astar, haversineTo, shortestPathTree, treePath } from './search'
+import type { TreeNode } from './search'
 
-const N_ATTEMPTS = 80
 /** Expand gap tolerance to this if too few routes are found at normal gap. */
 const EXPANDED_GAP_METERS = 1_000
 const MIN_ROUTES_BEFORE_EXPAND = 3
+/** Far points cast around the start for round trips, evenly spread; the seed rotates the fan. */
+const N_BEARINGS = 12
+/** Explore routes per start candidate, one per sector of bearing. */
+const MAX_EXPLORE_ROUTES = 12
+/**
+ * What the return leg of a loop pays to ride an outbound edge again. Large
+ * enough that it happens only where nothing else leads home — the retraced
+ * tail of a dead end — which closeLoop then cuts off.
+ */
+const RETRACE_COST_FACTOR = 1_000
 
 // ---------------------------------------------------------------------------
 // Routing strategy interface
@@ -29,27 +41,10 @@ export interface RoutingStrategy {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-function pickRandom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)]
-}
-
-/** Picks one item with probability proportional to its weight. */
-function pickWeighted<T>(items: T[], weights: number[]): T {
-  const total = weights.reduce((sum, w) => sum + w, 0)
-  if (total <= 0) return pickRandom(items)
-
-  let ticket = Math.random() * total
-  for (let i = 0; i < items.length; i++) {
-    ticket -= weights[i]
-    if (ticket < 0) return items[i]
-  }
-  return items[items.length - 1]
-}
-
 /**
  * Returns edge geometry oriented in the traversal direction (fromKey → toKey).
  * Edge geometries are stored in the direction the lane was ingested, which may
- * differ from the walk traversal direction. Reversing when needed ensures that
+ * differ from the direction of travel. Reversing when needed ensures that
  * segment geometries always reflect the actual path direction.
  */
 function orientedGeometry(fromKey: string, attrs: EdgeAttrs): LineString {
@@ -64,38 +59,6 @@ function toSegment(fromKey: string, attrs: EdgeAttrs): RouteSegment {
     distanceMeters: attrs.distanceMeters,
     ...(attrs.barrier ? { crossesBarrier: attrs.barrier } : {}),
   }
-}
-
-/**
- * Chooses the next node, weighted against gaps rather than forbidding them.
- *
- * Each edge weighs `distanceMeters / costMeters`, the reciprocal of its cost
- * premium: 1 for a lane, 1/gapPenaltyFactor for a gap. Dividing by length
- * matters — weighing raw cost would make the walk prefer short lanes over long
- * ones, which has nothing to do with the premise.
- *
- * Gaps that cross a barrier stay a strict last resort instead of joining the
- * draw. Their premium would give them a small but real chance at every
- * junction, and "a route that crosses an arterial where you cannot cross, 2 %
- * of the time" is not a trade the premise allows.
- */
-function chooseNeighbour(graph: BikeLaneGraph, current: string, neighbours: string[]): string {
-  const open: string[] = []
-  const weights: number[] = []
-  const barrierGaps: string[] = []
-
-  for (const neighbour of neighbours) {
-    const attrs = graph.getEdgeAttributes(graph.edge(current, neighbour)!)
-    if (attrs.barrier) {
-      barrierGaps.push(neighbour)
-      continue
-    }
-    open.push(neighbour)
-    weights.push(attrs.costMeters > 0 ? attrs.distanceMeters / attrs.costMeters : 1)
-  }
-
-  if (open.length === 0) return pickRandom(barrierGaps)
-  return pickWeighted(open, weights)
 }
 
 function segmentsToRoute(
@@ -128,95 +91,35 @@ function signature(segments: RouteSegment[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Core walk algorithms (used by the strategies below)
+// Core search algorithms (used by the strategies below)
 // ---------------------------------------------------------------------------
 
-/**
- * Single random walk from startKey.
- * At each step chooses a neighbour with chooseNeighbour, which weighs gaps
- * against lanes by their cost premium.
- * Returns segments if a walk of [minDist, maxDist] was completed, else null.
- */
-function randomWalk(
-  graph: BikeLaneGraph,
-  startKey: string,
-  minDist: number,
-  maxDist: number,
-): RouteSegment[] | null {
-  const visited = new Set([startKey])
-  let current = startKey
-  let total = 0
+function pathSegments(graph: BikeLaneGraph, nodePath: string[]): RouteSegment[] {
   const segments: RouteSegment[] = []
-
-  while (total < maxDist) {
-    const neighbours = graph.neighbors(current).filter(n => !visited.has(n))
-    if (neighbours.length === 0) break
-
-    const next = chooseNeighbour(graph, current, neighbours)
-
-    const edgeKey = graph.edge(current, next)
-    const attrs = graph.getEdgeAttributes(edgeKey)
-
-    total += attrs.distanceMeters
-    segments.push(toSegment(current, attrs))
-
-    visited.add(next)
-    current = next
-
-    if (total >= minDist) return segments
+  for (let i = 0; i < nodePath.length - 1; i++) {
+    const attrs = graph.getEdgeAttributes(graph.edge(nodePath[i], nodePath[i + 1])!)
+    segments.push(toSegment(nodePath[i], attrs))
   }
+  return segments
+}
 
-  return null
+function pathEdges(graph: BikeLaneGraph, nodePath: string[]): string[] {
+  const edges: string[] = []
+  for (let i = 0; i < nodePath.length - 1; i++) {
+    edges.push(graph.edge(nodePath[i], nodePath[i + 1])!)
+  }
+  return edges
+}
+
+function totalMeters(segments: RouteSegment[]): number {
+  return segments.reduce((sum, segment) => sum + segment.distanceMeters, 0)
 }
 
 /**
- * Round-trip random walk from startKey.
- * Never reuses the same edge. Returns to startKey to complete the loop.
- * Uses the same weighted choice as randomWalk at each step.
- * Returns segments when back at startKey with total in [minDist, maxDist], else null.
- */
-function randomWalkRoundTrip(
-  graph: BikeLaneGraph,
-  startKey: string,
-  minDist: number,
-  maxDist: number,
-): RouteSegment[] | null {
-  const visitedEdges = new Set<string>()
-  let current = startKey
-  let total = 0
-  const segments: RouteSegment[] = []
-
-  while (true) {
-    if (segments.length > 0 && current === startKey) {
-      return total >= minDist ? segments : null
-    }
-
-    const availableNeighbours = graph.neighbors(current).filter(n => {
-      const edgeKey = graph.edge(current, n)!
-      return !visitedEdges.has(edgeKey)
-    })
-
-    if (availableNeighbours.length === 0) return null
-
-    const next = chooseNeighbour(graph, current, availableNeighbours)
-
-    const edgeKey = graph.edge(current, next)!
-    const attrs = graph.getEdgeAttributes(edgeKey)
-
-    if (total + attrs.distanceMeters > maxDist) return null
-
-    total += attrs.distanceMeters
-    visitedEdges.add(edgeKey)
-    segments.push(toSegment(current, attrs))
-    current = next
-  }
-}
-
-/**
- * Finds the cheapest path from startKey to endKey using Dijkstra's algorithm,
- * weighted by costMeters — length for an ordinary edge, length times
- * BARRIER_COST_MULTIPLIER for a gap that crosses a barrier. The distance
- * bounds are still checked against real length, not cost.
+ * Finds the cheapest path from startKey to endKey with A*, weighted by
+ * costMeters and guided by the great-circle distance to the end (see
+ * haversineTo for why that stays admissible with gap penalties). The
+ * distance bounds are checked against real length, not cost.
  * Returns null when no path exists or the path falls outside [minDist, maxDist].
  */
 function findShortestPath(
@@ -226,56 +129,218 @@ function findShortestPath(
   minDist: number,
   maxDist: number,
 ): RouteSegment[] | null {
-  const nodePath = dijkstra.bidirectional(graph, startKey, endKey, 'costMeters')
-  if (!nodePath) return null
+  const { path } = astar(graph, startKey, endKey, { heuristic: haversineTo(graph, endKey) })
+  if (!path) return null
 
-  const segments: RouteSegment[] = []
-  let total = 0
-
-  for (let i = 0; i < nodePath.length - 1; i++) {
-    const from = nodePath[i]
-    const to = nodePath[i + 1]
-    const edgeKey = graph.edge(from, to)!
-    const attrs = graph.getEdgeAttributes(edgeKey)
-    total += attrs.distanceMeters
-    segments.push(toSegment(from, attrs))
-  }
-
+  const segments = pathSegments(graph, path)
+  const total = totalMeters(segments)
   if (total < minDist || total > maxDist) return null
   return segments
 }
 
-// ---------------------------------------------------------------------------
-// Public walk runners (used directly by tests and by strategy implementations)
-// ---------------------------------------------------------------------------
+/**
+ * Closes a loop through farKey: the cheapest path out (read from the start's
+ * shortest-path tree), then the cheapest path back that pays
+ * RETRACE_COST_FACTOR to reuse an outbound edge. When the far node is a dead
+ * end the return has no choice but to retrace the spur; that shared tail is
+ * cut off both legs, which moves the far point back to the last junction. Any
+ * other repeated edge means no loop exists that respects the round-trip
+ * promise, and null is returned.
+ */
+function closeLoop(
+  graph: BikeLaneGraph,
+  tree: Map<string, TreeNode>,
+  startKey: string,
+  farKey: string,
+): string[] | null {
+  if (!tree.has(farKey)) return null
+  const out = treePath(tree, farKey)
+  const outEdges = pathEdges(graph, out)
+  const outSet = new Set(outEdges)
 
-export function runWalks(
+  const back = astar(graph, farKey, startKey, {
+    heuristic: haversineTo(graph, startKey),
+    edgeCostFactor: edgeKey => (outSet.has(edgeKey) ? RETRACE_COST_FACTOR : 1),
+  }).path
+  if (!back) return null
+  const backEdges = pathEdges(graph, back)
+
+  let shared = 0
+  while (
+    shared < outEdges.length &&
+    shared < backEdges.length &&
+    outEdges[outEdges.length - 1 - shared] === backEdges[shared]
+  ) {
+    shared++
+  }
+  const outNodes = out.slice(0, out.length - shared)
+  const backNodes = back.slice(shared)
+  if (outNodes.length < 2) return null
+
+  const kept = new Set(outEdges.slice(0, outEdges.length - shared))
+  if (backEdges.slice(shared).some(edgeKey => kept.has(edgeKey))) return null
+
+  return [...outNodes, ...backNodes.slice(1)]
+}
+
+/**
+ * Round trips from startKey. A loop of length L is roughly a circle of
+ * diameter L/π, so a far point is cast that far from the start on each of
+ * N_BEARINGS bearings, snapped to the nearest node, and closeLoop joins the
+ * two legs. The outbound legs all come from one shortest-path tree, bounded
+ * at maxDist because a longer leg cannot be part of a loop that fits. Loops
+ * outside [minDist, maxDist] are dropped; the bearing fan is rotated by
+ * bearingOffset so different seeds cast at different points.
+ */
+function farPointLoops(
   graph: BikeLaneGraph,
   startKey: string,
   minDist: number,
   maxDist: number,
-  roundTrip = false,
-): Route[] {
+  bearingOffset: number,
+): RouteSegment[][] {
+  const start = graph.getNodeAttributes(startKey)
+  const tree = shortestPathTree(graph, startKey, maxDist)
+  const farMeters = (minDist + maxDist) / 2 / Math.PI
+  const step = 360 / N_BEARINGS
+  const loops: RouteSegment[][] = []
+  const tried = new Set<string>()
+
+  for (let i = 0; i < N_BEARINGS; i++) {
+    const [lon, lat] = destinationPoint(start.lon, start.lat, farMeters, bearingOffset + i * step)
+    const farKey = nearestNode(graph, lon, lat)
+    if (!farKey || farKey === startKey || tried.has(farKey)) continue
+    tried.add(farKey)
+
+    const loop = closeLoop(graph, tree, startKey, farKey)
+    if (!loop) continue
+    const segments = pathSegments(graph, loop)
+    const total = totalMeters(segments)
+    if (total >= minDist && total <= maxDist) loops.push(segments)
+  }
+
+  return loops
+}
+
+/**
+ * Explore routes from startKey: the cheapest path to a destination in each
+ * direction. One bounded shortest-path tree gives the cheapest path to every
+ * node within maxDist; the nodes at least minDist away are the candidates.
+ * They are split into MAX_EXPLORE_ROUTES sectors by bearing from the start,
+ * and each sector contributes the candidate nearest the middle of the
+ * distance range. A destination on the way to another chosen destination is
+ * dropped, since its route is a prefix of the longer one.
+ */
+function exploreRoutes(
+  graph: BikeLaneGraph,
+  startKey: string,
+  minDist: number,
+  maxDist: number,
+): RouteSegment[][] {
+  const tree = shortestPathTree(graph, startKey, maxDist)
+  const inRange = [...tree.entries()].filter(
+    ([key, node]) => key !== startKey && node.distanceMeters >= minDist,
+  )
+  const candidates = lastResortFilter(inRange, ([, node]) => node.barrierCrossings > 0)
+  if (candidates.length === 0) return []
+
+  const start = graph.getNodeAttributes(startKey)
+  const bearingOf = new Map(
+    candidates.map(([key]) => {
+      const node = graph.getNodeAttributes(key)
+      return [key, bearingDegrees(start.lon, start.lat, node.lon, node.lat)]
+    }),
+  )
+  candidates.sort(([a], [b]) => bearingOf.get(a)! - bearingOf.get(b)!)
+
+  const target = (minDist + maxDist) / 2
+  const sectors = Math.min(MAX_EXPLORE_ROUTES, candidates.length)
+  const sectorSize = candidates.length / sectors
+  const picked = new Set<string>()
+  for (let i = 0; i < sectors; i++) {
+    const sector = candidates.slice(Math.floor(i * sectorSize), Math.floor((i + 1) * sectorSize))
+    const [best] = sector.reduce((a, b) => (closerToTarget(a[1], b[1], target) ? a : b))
+    picked.add(best)
+  }
+
+  const onTheWay = new Set<string>()
+  for (const key of picked) {
+    for (const ancestor of treePath(tree, key).slice(0, -1)) onTheWay.add(ancestor)
+  }
+
+  return [...picked]
+    .filter(key => !onTheWay.has(key))
+    .map(key => pathSegments(graph, treePath(tree, key)))
+}
+
+function closerToTarget(a: TreeNode, b: TreeNode, target: number): boolean {
+  const gapA = Math.abs(a.distanceMeters - target)
+  const gapB = Math.abs(b.distanceMeters - target)
+  if (gapA !== gapB) return gapA < gapB
+  return a.costMeters <= b.costMeters
+}
+
+/**
+ * Keeps the items that are not a last resort, unless nothing else is left.
+ * Gaps that cross a barrier are priced 50× so a search takes them only when
+ * nothing cheaper leads there; this is the second half of that rule — a route
+ * over one is offered only when no clean route exists at all.
+ */
+function lastResortFilter<T>(items: T[], isLastResort: (item: T) => boolean): T[] {
+  const clean = items.filter(item => !isLastResort(item))
+  return clean.length > 0 ? clean : items
+}
+
+// ---------------------------------------------------------------------------
+// Public runners (used directly by tests and by strategy implementations)
+// ---------------------------------------------------------------------------
+
+function toRoutes(graph: BikeLaneGraph, candidates: RouteSegment[][]): Route[] {
   const barriersChecked = getGapStats(graph).barriersChecked
   const gapMeters = getMaxGapMeters(graph)
   const seen = new Set<string>()
   const routes: Route[] = []
-  for (let i = 0; i < N_ATTEMPTS; i++) {
-    const segs = roundTrip
-      ? randomWalkRoundTrip(graph, startKey, minDist, maxDist)
-      : randomWalk(graph, startKey, minDist, maxDist)
-    if (!segs) continue
-    const sig = signature(segs)
-    if (!seen.has(sig)) {
-      seen.add(sig)
-      routes.push(segmentsToRoute(segs, barriersChecked, gapMeters))
-    }
+  for (const segments of candidates) {
+    const sig = signature(segments)
+    if (seen.has(sig)) continue
+    seen.add(sig)
+    routes.push(segmentsToRoute(segments, barriersChecked, gapMeters))
   }
   return routes
 }
 
+/** Explore routes from startKey; see exploreRoutes. Deterministic. */
+export function runExplore(
+  graph: BikeLaneGraph,
+  startKey: string,
+  minDist: number,
+  maxDist: number,
+): Route[] {
+  return toRoutes(graph, exploreRoutes(graph, startKey, minDist, maxDist))
+}
+
 /**
- * Finds the shortest one-way route from startKey to endKey using Dijkstra.
+ * Round trips from startKey; see farPointLoops. The seed only rotates the
+ * bearing fan, so the same seed always gives the same loops. Loops crossing a
+ * barrier are offered only when no clean loop was found.
+ */
+export function runRoundTrip(
+  graph: BikeLaneGraph,
+  startKey: string,
+  minDist: number,
+  maxDist: number,
+  seed = 0,
+): Route[] {
+  const bearingOffset = seededRandom(seed)() * (360 / N_BEARINGS)
+  const loops = farPointLoops(graph, startKey, minDist, maxDist, bearingOffset)
+  return toRoutes(
+    graph,
+    lastResortFilter(loops, segments => segments.some(s => s.crossesBarrier !== undefined)),
+  )
+}
+
+/**
+ * Finds the shortest one-way route from startKey to endKey with A*.
  * Returns an array with one route, or empty if no path exists within [minDist, maxDist].
  */
 export function runOneWay(
@@ -287,7 +352,7 @@ export function runOneWay(
 ): Route[] {
   const segments = findShortestPath(graph, startKey, endKey, minDist, maxDist)
   if (!segments) return []
-  return [segmentsToRoute(segments, getGapStats(graph).barriersChecked, getMaxGapMeters(graph))]
+  return toRoutes(graph, [segments])
 }
 
 // ---------------------------------------------------------------------------
@@ -296,13 +361,13 @@ export function runOneWay(
 
 function exploreStrategy(minDist: number, maxDist: number): RoutingStrategy {
   return {
-    findRoutes: (graph, startKey) => runWalks(graph, startKey, minDist, maxDist, false),
+    findRoutes: (graph, startKey) => runExplore(graph, startKey, minDist, maxDist),
   }
 }
 
-function roundTripStrategy(minDist: number, maxDist: number): RoutingStrategy {
+function roundTripStrategy(minDist: number, maxDist: number, seed: number): RoutingStrategy {
   return {
-    findRoutes: (graph, startKey) => runWalks(graph, startKey, minDist, maxDist, true),
+    findRoutes: (graph, startKey) => runRoundTrip(graph, startKey, minDist, maxDist, seed),
   }
 }
 
@@ -315,10 +380,14 @@ function oneWayStrategy(endKey: string, minDist: number, maxDist: number): Routi
   }
 }
 
-function buildStrategy(preferences: RoutePreferences, endKey?: string): RoutingStrategy {
+function buildStrategy(
+  preferences: RoutePreferences,
+  seed: number,
+  endKey?: string,
+): RoutingStrategy {
   const { minDistanceMeters: min, maxDistanceMeters: max } = preferences
   if (endKey) return oneWayStrategy(endKey, min, max)
-  if (preferences.roundTrip) return roundTripStrategy(min, max)
+  if (preferences.roundTrip) return roundTripStrategy(min, max, seed)
   return exploreStrategy(min, max)
 }
 
@@ -377,16 +446,29 @@ function executeWithCandidates(
 // Public entry point
 // ---------------------------------------------------------------------------
 
+export interface RoutingOptions {
+  /** Barrier geometry for the gap veto; omitted means gaps are not checked. */
+  barriers?: BarrierData
+  /**
+   * Rotates the round-trip bearing fan. The same lanes, preferences and seed
+   * always give the same routes, so a route can be reproduced from its inputs.
+   */
+  seed?: number
+}
+
 /**
- * Finds route candidates based on the given preferences.
+ * Finds route candidates based on the given preferences. The three strategies
+ * are described in docs/algorithms.md §5; in one line each:
  *
- * - One-way  (endLon + endLat set): DFS finds all simple paths from start to end
- *   without repeating any edge, up to MAX_ONE_WAY_PATHS routes.
- * - Round-trip (roundTrip: true): random walks returning to start without edge repetition.
- * - Explore   (default): random walks from start up to maxDistanceMeters.
+ * - One-way  (endLon + endLat set): A* to the node nearest the destination,
+ *   guided by great-circle distance; one route, the cheapest.
+ * - Round-trip (roundTrip: true): far points cast around the start, a path
+ *   out to each and an edge-disjoint path back.
+ * - Explore   (default): the cheapest path to a destination in each direction,
+ *   from one bounded shortest-path tree.
  *
- * All bike lane endpoints within startProximityMeters of the start coordinate are
- * used as candidates, increasing route diversity near multi-lane junctions.
+ * Every strategy runs from each lane endpoint within startProximityMeters of
+ * the start coordinate, and the routes are deduplicated across candidates.
  *
  * When too few routes are found the tolerance is widened to EXPANDED_GAP_METERS and the
  * search repeats. Routes from that pass keep the rider's original figure in
@@ -396,9 +478,10 @@ function executeWithCandidates(
 export function findRoutes(
   lanes: BikeLane[],
   preferences: RoutePreferences,
-  barriers?: BarrierData,
+  options: RoutingOptions = {},
 ): Route[] {
   const { startLon, startLat, endLon, endLat, startProximityMeters } = preferences
+  const { barriers, seed = 0 } = options
 
   let graph = buildGraph(lanes, preferences.maxGapMeters, { barriers })
 
@@ -407,7 +490,7 @@ export function findRoutes(
       ? (nearestNode(graph, endLon, endLat) ?? undefined)
       : undefined
 
-  const strategy = buildStrategy(preferences, endKey)
+  const strategy = buildStrategy(preferences, seed, endKey)
 
   let routes = withinTolerance(
     executeWithCandidates(graph, startLon, startLat, startProximityMeters, strategy),
@@ -421,7 +504,7 @@ export function findRoutes(
     ).map(route => ({ ...route, requestedGapMeters: preferences.maxGapMeters }))
   }
 
-  // One-way routing uses Dijkstra per start candidate — return only the globally shortest.
+  // One-way routing runs A* per start candidate — return only the globally cheapest.
   if (endKey && routes.length > 1) {
     routes = [routes.reduce((a, b) => (a.totalDistanceMeters <= b.totalDistanceMeters ? a : b))]
   }

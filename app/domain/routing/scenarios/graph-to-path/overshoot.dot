@@ -1,0 +1,19 @@
+// Explore from A. The first edge leaves the walk 100 m short of minDist, and
+// the only continuation is a 900 m edge that would land at 1 300 m — far past
+// maxDist = 700. A router that treats maxDist as a bound returns nothing here;
+// one that only checks the bound before taking a step returns the 1 300 m route.
+//
+//   A --400m-- B --900m-- C
+//
+graph overshoot {
+  graph [
+    description = "maxDist is a hard bound: an edge that overshoots it is not taken",
+    start = "A",
+    minDist = 500,
+    maxDist = 700,
+    expect_maxRoutes = 0
+  ]
+
+  A -- B [distance=400, type=lane]
+  B -- C [distance=900, type=lane]
+}

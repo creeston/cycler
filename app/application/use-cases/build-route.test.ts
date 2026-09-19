@@ -134,7 +134,7 @@ describe('buildRoute cache', () => {
     expect(findRoutesMock).toHaveBeenLastCalledWith(
       lanes,
       { ...preferences, minDistanceMeters: 0, maxDistanceMeters: Number.MAX_SAFE_INTEGER },
-      undefined,
+      { barriers: undefined },
     )
   })
 })

@@ -7,6 +7,8 @@ export interface ParsedEdge {
 export interface ParsedDotGraph {
   name: string
   graphAttrs: Record<string, string>
+  /** Attributes of every node declared with its own statement, by name. */
+  nodes: Record<string, Record<string, string>>
   edges: ParsedEdge[]
 }
 
@@ -24,8 +26,11 @@ function parseAttrBlock(block: string): Record<string, string> {
  * Parses the subset of DOT language used for routing test scenarios:
  *   graph NAME {
  *     graph [key=value, ...]
+ *     NODE [key=value, ...]
  *     NODE1 -- NODE2 [key=value, ...]
  *   }
+ * The graph attribute block may span lines; node and edge statements are one
+ * per line or separated by semicolons.
  */
 export function parseDot(content: string): ParsedDotGraph {
   const cleaned = content.replace(/\/\/[^\n]*/g, '')
@@ -36,15 +41,26 @@ export function parseDot(content: string): ParsedDotGraph {
   const graphBlockMatch = /\bgraph\s*\[([\s\S]*?)\]/.exec(cleaned)
   const graphAttrs = graphBlockMatch ? parseAttrBlock(graphBlockMatch[1]) : {}
 
-  // Strip graph attr block and quoted strings before scanning for edge declarations
-  const forEdges = cleaned.replace(/\bgraph\s*\[([\s\S]*?)\]/g, '').replace(/"[^"]*"/g, '""')
+  const body = cleaned
+    .replace(/\bgraph\s*\[([\s\S]*?)\]/g, '')
+    .replace(/graph\s+\w+\s*\{/, '')
+    .replace(/\}\s*$/, '')
 
+  const nodes: Record<string, Record<string, string>> = {}
   const edges: ParsedEdge[] = []
-  const edgeRe = /\b(\w+)\s*--\s*(\w+)(?:\s*\[([^\]]*)\])?/g
-  let m: RegExpExecArray | null
-  while ((m = edgeRe.exec(forEdges)) !== null) {
-    edges.push({ from: m[1], to: m[2], attrs: m[3] ? parseAttrBlock(m[3]) : {} })
+  const edgeRe = /^(\w+)\s*--\s*(\w+)(?:\s*\[([^\]]*)\])?$/
+  const nodeRe = /^(\w+)\s*(?:\[([^\]]*)\])?$/
+  for (const raw of body.split(/[\n;]/)) {
+    const statement = raw.trim()
+    if (statement === '') continue
+    const edge = edgeRe.exec(statement)
+    if (edge) {
+      edges.push({ from: edge[1], to: edge[2], attrs: edge[3] ? parseAttrBlock(edge[3]) : {} })
+      continue
+    }
+    const node = nodeRe.exec(statement)
+    if (node) nodes[node[1]] = node[2] ? parseAttrBlock(node[2]) : {}
   }
 
-  return { name, graphAttrs, edges }
+  return { name, graphAttrs, nodes, edges }
 }

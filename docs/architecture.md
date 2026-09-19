@@ -86,7 +86,7 @@ graph TD
 
 | Layer | Modules | Depends on |
 |---|---|---|
-| `domain` | `entities/` (BikeLane, Barrier, Route, RoutePreferences, CachedArea) · `routing/` (graph, spatial-index, route-finder, algorithms, barriers) · `mappers/` (osm-to-domain, osm-to-barriers, geojson-from-domain) | nothing in-app; only `geojson` types, `graphology`, `@turf/turf` |
+| `domain` | `entities/` (BikeLane, Barrier, Route, RoutePreferences, CachedArea) · `routing/` (graph, spatial-index, route-finder, search, random, algorithms, barriers) · `mappers/` (osm-to-domain, osm-to-barriers, geojson-from-domain) | nothing in-app; only `geojson` types, `graphology`, `@turf/turf` |
 | `infrastructure` | `osm/` (overpass-client, queries) · `cache/` (db, area-cache) · `export/` (gpx) | `domain/entities` |
 | `application` | `use-cases/` (fetchArea, buildRoute) · `stores/` (map-store, routing-store) | `domain`, `infrastructure` |
 | `presentation` | `components/map` · `components/layout` · `components/ui` · `hooks/` | `application`, plus domain types and view mappers |
@@ -255,13 +255,13 @@ interface RoutingStrategy {
 }
 ```
 
-`buildStrategy(preferences, endKey?)` selects between three implementations:
+`buildStrategy(preferences, seed, endKey?)` selects between three implementations:
 
 | Selected when | Strategy | Algorithm |
 |---|---|---|
-| `endLon` + `endLat` set | `oneWayStrategy` | bidirectional Dijkstra, single shortest path |
-| `roundTrip: true` | `roundTripStrategy` | edge-disjoint random walk returning to start |
-| neither | `exploreStrategy` | node-disjoint random walk |
+| `endLon` + `endLat` set | `oneWayStrategy` | A* with a Haversine heuristic, single cheapest path |
+| `roundTrip: true` | `roundTripStrategy` | far points cast around the start; a path out and an edge-disjoint path back |
+| neither | `exploreStrategy` | one bounded shortest-path tree; the cheapest path to a destination in each direction |
 
 `executeWithCandidates` then runs the chosen strategy from every start node within
 `startProximityMeters` and deduplicates across all of them. Full treatment in
@@ -282,7 +282,7 @@ set by map-pick mode, touch long-press, or desktop right-click.
 | Base map | OpenFreeMap Positron | Free, no API key, muted palette that lets the orange overlay dominate |
 | OSM data | Overpass API + `osmtogeojson` | CORS-friendly, no key, best coverage of `cycleway:*` tagging |
 | Geospatial | `@turf/turf` | `turf.length` for geodesic lane length |
-| Graph | `graphology` + `graphology-shortest-path` | Typed graph with edge attributes; bidirectional Dijkstra built in |
+| Graph | `graphology` | Typed graph with edge attributes; the searches are hand-written in `routing/search.ts` (`graphology-shortest-path` is still listed in `package.json` but no longer imported) |
 | State | `zustand` + `persist` | Two small stores, no provider nesting |
 | Persistence | `idb` | Typed IndexedDB wrapper; GeoJSON blobs exceed localStorage limits |
 | Styling | Tailwind CSS v4 (`@tailwindcss/vite`) | Zero runtime, CSS-first `@theme` config |

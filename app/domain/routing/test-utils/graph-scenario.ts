@@ -3,8 +3,9 @@ import { readFileSync } from 'fs'
 import { BARRIER_COST_MULTIPLIER, gapPenaltyFactor } from '../graph'
 import { DEFAULT_PREFERENCES } from '../../entities/route'
 import { parseDot } from './dot-parser'
-import { coordKey } from '../algorithms'
+import { coordKey, haversineMeters, METERS_PER_DEGREE } from '../algorithms'
 import type { BikeLaneGraph, EdgeAttrs } from '../graph'
+import type { ParsedEdge } from './dot-parser'
 
 export interface ScenarioExpect {
   minRoutes?: number
@@ -36,18 +37,44 @@ export interface Scenario {
 }
 
 /**
+ * Longitude spacing of the line layout: the whole line spans no more than the
+ * shortest edge, so the crow-flies distance between any two nodes never
+ * exceeds the length of a path between them and the A* heuristic stays
+ * admissible. Capped so nodes without a short edge are not spread far apart.
+ */
+function lineSpacingDegrees(edges: ParsedEdge[], nodeCount: number): number {
+  const lengths = edges.map(e => parseFloat(e.attrs.distance ?? '0')).filter(d => d > 0)
+  if (lengths.length === 0 || nodeCount < 2) return MAX_LINE_SPACING_DEGREES
+  const spacing = Math.min(...lengths) / (nodeCount - 1) / METERS_PER_DEGREE
+  if (spacing < MIN_LINE_SPACING_DEGREES) {
+    throw new Error(
+      `Line layout cannot keep ${nodeCount} nodes distinct and the heuristic admissible; give nodes x/y positions`,
+    )
+  }
+  return Math.min(spacing, MAX_LINE_SPACING_DEGREES)
+}
+
+const MAX_LINE_SPACING_DEGREES = 0.001
+/** Two grid cells of coordKey, so neighbouring nodes never snap to the same key. */
+const MIN_LINE_SPACING_DEGREES = 0.00002
+
+/**
  * Loads a .dot scenario file and builds a BikeLaneGraph directly from it,
  * bypassing geographic coordinate mapping. Used to test pure graph routing logic.
+ *
+ * A node declared as `A [x=120, y=-40]` sits that many metres east and north
+ * of the origin, on the equator; an edge between two such nodes defaults its
+ * `distance` to the crow-flies distance. Nodes without a position are placed
+ * along a line (lineSpacingDegrees), which keeps every node distinguishable
+ * by coordinate — the signature() deduplication relies on geometry
+ * coordinates[0] — while keeping the A* heuristic admissible.
  */
 export function loadScenario(filePath: string): Scenario {
   const content = readFileSync(filePath, 'utf-8')
-  const { name, graphAttrs: ga, edges } = parseDot(content)
+  const { name, graphAttrs: ga, nodes, edges } = parseDot(content)
 
   const graph: BikeLaneGraph = new Graph({ type: 'undirected', multi: false })
 
-  // Assign each node a unique longitude so edge geometries are distinguishable.
-  // The signature() deduplication in runWalks relies on geometry coordinates[0],
-  // so nodes must have unique positions for route diversity to be detected correctly.
   const nodeOrder: string[] = []
   const seenNodes = new Set<string>()
   for (const edge of edges) {
@@ -60,14 +87,29 @@ export function loadScenario(filePath: string): Scenario {
       seenNodes.add(edge.to)
     }
   }
+  const spacing = lineSpacingDegrees(edges, nodeOrder.length)
   for (let i = 0; i < nodeOrder.length; i++) {
-    graph.mergeNode(nodeOrder[i], { lon: i * 0.001, lat: 0 })
+    const declared = nodes[nodeOrder[i]]
+    if (declared?.x !== undefined && declared.y !== undefined) {
+      graph.mergeNode(nodeOrder[i], {
+        lon: parseFloat(declared.x) / METERS_PER_DEGREE,
+        lat: parseFloat(declared.y) / METERS_PER_DEGREE,
+      })
+    } else {
+      graph.mergeNode(nodeOrder[i], { lon: i * spacing, lat: 0 })
+    }
   }
 
   for (const edge of edges) {
-    const fromLon = graph.getNodeAttribute(edge.from, 'lon')
-    const toLon = graph.getNodeAttribute(edge.to, 'lon')
-    const distanceMeters = parseFloat(edge.attrs.distance ?? '0')
+    const from = graph.getNodeAttributes(edge.from)
+    const to = graph.getNodeAttributes(edge.to)
+    const positioned = nodes[edge.from]?.x !== undefined && nodes[edge.to]?.x !== undefined
+    const distanceMeters =
+      edge.attrs.distance !== undefined
+        ? parseFloat(edge.attrs.distance)
+        : positioned
+          ? haversineMeters(from.lon, from.lat, to.lon, to.lat)
+          : 0
     // `barrier=major_road|railway|water` marks a gap the router should avoid.
     const barrier = edge.attrs.barrier as EdgeAttrs['barrier']
     const isGap = edge.attrs.type === 'gap'
@@ -86,8 +128,8 @@ export function loadScenario(filePath: string): Scenario {
       geometry: {
         type: 'LineString',
         coordinates: [
-          [fromLon, 0],
-          [toLon, 0],
+          [from.lon, from.lat],
+          [to.lon, to.lat],
         ],
       },
     })

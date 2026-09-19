@@ -1,0 +1,86 @@
+// A 2 400 m square ring with a 100 m dead-end spur at each of its twelve
+// nodes. The ring is the only loop; a random walk completes it with
+// probability about 2^-12 per attempt, because at every node half the unused
+// edges lead into a spur. A search aimed at a far point across the ring closes
+// it every time — even when the far point snaps to a spur end and the way
+// back has to retrace that spur.
+//
+// Nodes carry x/y positions in metres; edge lengths follow from them.
+// minDist = 1500 admits only the full ring (a spur out and back is 200 m).
+//
+//                    S4    S5    S6
+//                     |     |     |
+//        S3 -- L3 -- L4 -- L5 -- L6
+//               |                 |
+//        S2 -- L2                L7 -- S7
+//               |                 |
+//        S1 -- L1                L8 -- S8
+//               |                 |
+//              L0 -- L11 - L10 - L9 -- S9
+//               |     |     |
+//              S0    S11   S10
+//
+graph round_trip_spurs {
+  graph [
+    description = "A far-point search closes a loop that a random walk almost never does",
+    start = "L0",
+    minDist = 1500,
+    maxDist = 5000,
+    roundTrip = "true",
+    expect_isRoundTrip = "true",
+    expect_minRoutes = 1,
+    expect_any_route = "L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11,L0;L0,L11,L10,L9,L8,L7,L6,L5,L4,L3,L2,L1,L0"
+  ]
+
+  L0 [x=0, y=0]
+  L1 [x=0, y=200]
+  L2 [x=0, y=400]
+  L3 [x=0, y=600]
+  L4 [x=200, y=600]
+  L5 [x=400, y=600]
+  L6 [x=600, y=600]
+  L7 [x=600, y=400]
+  L8 [x=600, y=200]
+  L9 [x=600, y=0]
+  L10 [x=400, y=0]
+  L11 [x=200, y=0]
+
+  S0 [x=0, y=-100]
+  S1 [x=-100, y=200]
+  S2 [x=-100, y=400]
+  S3 [x=-100, y=600]
+  S4 [x=200, y=700]
+  S5 [x=400, y=700]
+  S6 [x=600, y=700]
+  S7 [x=700, y=400]
+  S8 [x=700, y=200]
+  S9 [x=700, y=0]
+  S10 [x=400, y=-100]
+  S11 [x=200, y=-100]
+
+  L0 -- L1 [type=lane]
+  L1 -- L2 [type=lane]
+  L2 -- L3 [type=lane]
+  L3 -- L4 [type=lane]
+  L4 -- L5 [type=lane]
+  L5 -- L6 [type=lane]
+  L6 -- L7 [type=lane]
+  L7 -- L8 [type=lane]
+  L8 -- L9 [type=lane]
+  L9 -- L10 [type=lane]
+  L10 -- L11 [type=lane]
+  L11 -- L0 [type=lane]
+
+  L0 -- S0 [type=lane]
+  L1 -- S1 [type=lane]
+  L2 -- S2 [type=lane]
+  L3 -- S3 [type=lane]
+  L4 -- S4 [type=lane]
+  L5 -- S5 [type=lane]
+  L6 -- S6 [type=lane]
+  L7 -- S7 [type=lane]
+  L8 -- S8 [type=lane]
+  L9 -- S9 [type=lane]
+  L10 -- S10 [type=lane]
+  L11 -- S11 [type=lane]
+}

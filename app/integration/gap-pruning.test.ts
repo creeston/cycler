@@ -3,8 +3,8 @@
  *
  * buildGraph keeps only a fraction of the endpoint pairs within maxGapMeters
  * (see graph.ts). These tests pin the two properties that pruning must not
- * break: the graph stays as connected as an unpruned build, and the walks
- * still find many distinct routes.
+ * break: the graph stays as connected as an unpruned build, and the router
+ * still finds many distinct routes.
  *
  * buildGraphUnpruned at the bottom of this file is the pre-pruning algorithm,
  * kept as the baseline to compare against.
@@ -13,7 +13,7 @@
  * almost connected, so at the default 200 m only a handful of gaps survive;
  * the numbers below are re-measured from that state.
  */
-import { describe, it, expect, beforeAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
@@ -22,7 +22,7 @@ import { geojsonToBikeLanes } from '~/domain/mappers/osm-to-domain'
 import { buildGraph, getGapStats, nodesWithinMeters } from '~/domain/routing/graph'
 import type { BikeLaneGraph } from '~/domain/routing/graph'
 import { osmLevel } from '~/domain/mappers/osm-to-barriers'
-import { runWalks } from '~/domain/routing/route-finder'
+import { runExplore, runRoundTrip } from '~/domain/routing/route-finder'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -37,11 +37,6 @@ let lanes: BikeLane[]
 beforeAll(() => {
   const fc = JSON.parse(readFileSync(DATA_PATH, 'utf-8')) as FeatureCollection
   lanes = geojsonToBikeLanes(fc)
-})
-
-const realRandom = Math.random
-afterEach(() => {
-  Math.random = realRandom
 })
 
 describe('gap pruning — Warsaw overpass data', () => {
@@ -94,15 +89,14 @@ describe('gap pruning — Warsaw overpass data', () => {
   })
 
   it('still finds many distinct explore routes', () => {
-    // Measured over 10 seeds: 107.6 routes on average, never below 97.
+    // Measured: 126 routes; explore is deterministic.
     expect(countRoutes(buildGraph(lanes, 200), false)).toBeGreaterThan(20)
   })
 
-  it('still finds many distinct round-trip routes at the expanded tolerance', () => {
-    // At 200 m the honest lane graph has few cycles: 3.2 loops on average over
-    // 10 seeds, 0 in the worst seed, so the finder widens to 1 000 m.
-    // Measured there over 10 seeds: 19.8 routes on average, never below 16.
-    expect(countRoutes(buildGraph(lanes, 1_000), true)).toBeGreaterThan(5)
+  it('still finds many distinct round-trip routes', () => {
+    // Measured: 71 loops at 200 m with seed 42; the random walk this
+    // replaced found 3.2 on average and needed the 1 000 m fallback.
+    expect(countRoutes(buildGraph(lanes, 200), true)).toBeGreaterThan(5)
   })
 })
 
@@ -154,24 +148,14 @@ function laneOnlyComponents(graph: BikeLaneGraph): Map<string, string> {
   return component
 }
 
-/** Deterministic PRNG so route counts do not vary between runs. */
-function mulberry32(seed: number): () => number {
-  let a = seed
-  return () => {
-    a |= 0
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
 function countRoutes(graph: BikeLaneGraph, roundTrip: boolean): number {
-  Math.random = mulberry32(42)
   const signatures = new Set<string>()
 
   for (const startKey of nodesWithinMeters(graph, START_LON, START_LAT, 300)) {
-    for (const route of runWalks(graph, startKey, 2_000, 10_000, roundTrip)) {
+    const routes = roundTrip
+      ? runRoundTrip(graph, startKey, 2_000, 10_000, 42)
+      : runExplore(graph, startKey, 2_000, 10_000)
+    for (const route of routes) {
       signatures.add(route.segments.map(s => s.geometry.coordinates[0].join(',')).join('|'))
     }
   }

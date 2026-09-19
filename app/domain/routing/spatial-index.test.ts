@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { METERS_PER_DEGREE, approxMeters } from './algorithms'
 import { buildPointIndex, forEachPairWithin, nearestPoint, pointsWithin } from './spatial-index'
-import { seededRandom } from './test-utils/synthetic-lanes'
+import { seededRandom } from './random'
 
 /** Latitudes where the old rectangular prefilter was safe (52°) and where it was not (75°, 85°). */
 const LATITUDES = [0, 52, 75, 85]

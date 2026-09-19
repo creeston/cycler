@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { loadScenario } from './test-utils/graph-scenario'
-import { runWalks, runOneWay } from './route-finder'
+import { runExplore, runOneWay, runRoundTrip } from './route-finder'
+import { astar, haversineTo } from './search'
 import { approxMeters, coordKey } from './algorithms'
 import { buildGraph } from './graph'
 import type { BikeLane } from '../entities/bike-lane'
@@ -26,14 +27,22 @@ function routeNodeSequence(segments: RouteSegment[], keyToName: Map<string, stri
   return nodes
 }
 
+/** Round trips rotate their bearing fan by a seed; scenarios pin one so the runs are repeatable. */
+const SCENARIO_SEED = 1
+
 function runScenario(sc: Scenario): Route[] {
   if (sc.endKey) {
     return runOneWay(sc.graph, sc.startKey, sc.endKey, sc.minDist, sc.maxDist)
   }
-  return runWalks(sc.graph, sc.startKey, sc.minDist, sc.maxDist, sc.roundTrip)
+  if (sc.roundTrip) {
+    return runRoundTrip(sc.graph, sc.startKey, sc.minDist, sc.maxDist, SCENARIO_SEED)
+  }
+  return runExplore(sc.graph, sc.startKey, sc.minDist, sc.maxDist)
 }
 
-function check(routes: Route[], ex: ScenarioExpect, keyToName: Map<string, string>) {
+function check(routes: Route[], sc: Scenario) {
+  const ex: ScenarioExpect = sc.expect
+  const keyToName = sc.keyToName
   for (const route of routes) {
     for (let i = 0; i < route.segments.length - 1; i++) {
       const current = route.segments[i].geometry.coordinates
@@ -45,6 +54,13 @@ function check(routes: Route[], ex: ScenarioExpect, keyToName: Map<string, strin
         `route geometry is discontinuous between segments ${i} and ${i + 1}`,
       ).toBeLessThanOrEqual(2)
     }
+  }
+
+  for (const route of routes) {
+    expect(route.totalDistanceMeters, 'route shorter than minDist').toBeGreaterThanOrEqual(
+      sc.minDist,
+    )
+    expect(route.totalDistanceMeters, 'route longer than maxDist').toBeLessThanOrEqual(sc.maxDist)
   }
 
   if (ex.minRoutes !== undefined) expect(routes.length).toBeGreaterThanOrEqual(ex.minRoutes)
@@ -96,57 +112,88 @@ function check(routes: Route[], ex: ScenarioExpect, keyToName: Map<string, strin
 describe('graph routing scenarios', () => {
   it('simple-chain: finds the exact route A,B,C,D,E on a straight connected chain', () => {
     const sc = loadScenario(scenario('simple-chain.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
   })
 
   it('gap-bridging: finds exact route A,B,C,D,E,F traversing the gap edge', () => {
     const sc = loadScenario(scenario('gap-bridging.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
   })
 
   it('dead-end: finds exact route A,B,C,E,F bypassing the dead-end branch', () => {
     const sc = loadScenario(scenario('dead-end.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
   })
 
   it('branching: discovers both routes A,B,C,E and A,B,D,F through the fork', () => {
     const sc = loadScenario(scenario('branching.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
   })
 
   it('isolated-lanes: returns no routes when all segments are too short', () => {
     const sc = loadScenario(scenario('isolated-lanes.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
   })
 
   it('round-trip: finds a circular route returning to start without repeating edges', () => {
     const sc = loadScenario(scenario('round-trip.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
   })
 
   it('one-way-chain: finds the single route A→E on a straight chain', () => {
     const sc = loadScenario(scenario('one-way-chain.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
   })
 
   it('one-way-branching: finds shortest path A→E through a fork (either branch)', () => {
     const sc = loadScenario(scenario('one-way-branching.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
   })
 
   it('gap-penalty-detour: takes the longer all-lane route once gaps are priced', () => {
     const sc = loadScenario(scenario('gap-penalty-detour.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
   })
 
   it('barrier-detour: routes the long way round rather than across an arterial', () => {
     const sc = loadScenario(scenario('barrier-detour.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
   })
 
-  it('barrier-last-resort: the walk never takes the flagged gap while a clean one exists', () => {
+  it('barrier-last-resort: the flagged gap is never taken while a clean one exists', () => {
     const sc = loadScenario(scenario('barrier-last-resort.dot'))
-    check(runScenario(sc), sc.expect, sc.keyToName)
+    check(runScenario(sc), sc)
+  })
+
+  it('overshoot: explore never returns a route longer than maxDist', () => {
+    const sc = loadScenario(scenario('overshoot.dot'))
+    check(runScenario(sc), sc)
+  })
+
+  it('round-trip-spurs: closes the loop although every node offers a dead end', () => {
+    const sc = loadScenario(scenario('round-trip-spurs.dot'))
+    check(runScenario(sc), sc)
+  })
+
+  it('round-trip-lollipop: returns no loop when the only way home repeats an edge', () => {
+    const sc = loadScenario(scenario('round-trip-lollipop.dot'))
+    check(runScenario(sc), sc)
+  })
+
+  it('grid-heuristic: finds the straight row across the grid', () => {
+    const sc = loadScenario(scenario('grid-heuristic.dot'))
+    check(runScenario(sc), sc)
+  })
+
+  it('grid-heuristic: A* expands strictly fewer nodes than Dijkstra for the same path', () => {
+    const sc = loadScenario(scenario('grid-heuristic.dot'))
+    const guided = astar(sc.graph, sc.startKey, sc.endKey!, {
+      heuristic: haversineTo(sc.graph, sc.endKey!),
+    })
+    const dijkstra = astar(sc.graph, sc.startKey, sc.endKey!)
+
+    expect(guided.path).toEqual(dijkstra.path)
+    expect(guided.expanded).toBeLessThan(dijkstra.expanded)
   })
 })
 

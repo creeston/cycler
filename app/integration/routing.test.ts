@@ -9,10 +9,9 @@
  *
  * Coordinates follow the GeoJSON/routing convention: [longitude, latitude].
  *
- * maxDistanceMeters for the one-way test is deliberately short (4 km) because
- * the DFS explores all simple paths and its cost grows with route depth.
- * The straight-line start↔end distance here is ~1.25 km, so 4 km allows a
- * reasonable detour while keeping the search space tractable.
+ * The one-way test uses a 30 km ceiling so the distance filter never rejects
+ * the path: the straight-line start↔end distance is ~1.25 km, and the test is
+ * about the path being found and well-formed, not about its length.
  */
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'fs'
@@ -45,6 +44,10 @@ const BASE_PREFERENCES = {
 
 function hasOnlyValidSegmentTypes(route: Route): boolean {
   return route.segments.every(s => s.type === 'bike_lane' || s.type === 'gap')
+}
+
+function signature(route: Route): string {
+  return route.segments.map(s => s.geometry.coordinates[0].join(',')).join('|')
 }
 
 function countDiscontinuities(routes: Route[]): number {
@@ -116,6 +119,45 @@ describe('routing integration — Warsaw overpass data', () => {
 
     it('every route has continuous segment geometry', () => {
       expect(countDiscontinuities(routes)).toBe(0)
+    })
+  })
+
+  describe('explore routing', () => {
+    it('keeps every route inside a narrow distance band', () => {
+      const routes = findRoutes(lanes, {
+        ...BASE_PREFERENCES,
+        minDistanceMeters: 3_000,
+        maxDistanceMeters: 3_500,
+      })
+
+      expect(routes.length).toBeGreaterThan(0)
+      routes.forEach(r => {
+        expect(r.totalDistanceMeters).toBeGreaterThanOrEqual(3_000)
+        expect(r.totalDistanceMeters).toBeLessThanOrEqual(3_500)
+      })
+    })
+  })
+
+  describe('determinism', () => {
+    const preferences = {
+      ...BASE_PREFERENCES,
+      minDistanceMeters: 2_000,
+      maxDistanceMeters: 10_000,
+    }
+
+    it.each([false, true])('the same seed gives the same routes (roundTrip: %s)', roundTrip => {
+      const first = findRoutes(lanes, { ...preferences, roundTrip }, { seed: 7 })
+      const second = findRoutes(lanes, { ...preferences, roundTrip }, { seed: 7 })
+
+      expect(first.length).toBeGreaterThan(0)
+      expect(first.map(signature)).toEqual(second.map(signature))
+    })
+
+    it('a different seed casts the round-trip fan elsewhere', () => {
+      const first = findRoutes(lanes, { ...preferences, roundTrip: true }, { seed: 7 })
+      const second = findRoutes(lanes, { ...preferences, roundTrip: true }, { seed: 8 })
+
+      expect(first.map(signature)).not.toEqual(second.map(signature))
     })
   })
 

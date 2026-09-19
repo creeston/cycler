@@ -48,8 +48,9 @@ points back outward.
 
 ### Layer responsibilities in one line each
 
-- **domain** — pure functions and types. Deterministic given inputs (the routing walks use
-  `Math.random()`, which is a known wart; see [02](../backlog/02-astar-routing.md)).
+- **domain** — pure functions and types. Deterministic given inputs: nothing in it calls
+  `Math.random()`. The one random element in routing, the seed that rotates the round-trip
+  bearing fan, is passed in by the caller (`findRoutes(lanes, preferences, { seed })`).
 - **infrastructure** — everything that can fail because the outside world exists. Network,
   storage, files. Each module owns one external system and exports a typed error.
 - **application** — orchestration. Use cases sequence infrastructure and domain calls; stores hold
@@ -145,7 +146,7 @@ No semicolons, single quotes, 100 columns, trailing commas, arrow parens avoided
 **This is the most important section in the document.**
 
 Route finding is the part of this app that is genuinely hard to reason about: the graph is built
-from messy real-world geometry, two of three strategies are randomised, and failures are silent —
+from messy real-world geometry, two of three strategies choose their own destinations, and failures are silent —
 a subtly wrong algorithm returns a route that looks plausible on a map and is wrong. Debugging
 that against a 5 000-lane city fetch is hopeless.
 
@@ -171,9 +172,9 @@ when you change `buildGraph`.
 
 ### 4.2 The `graph-to-path` DSL
 
-A scenario is a DOT file holding a graph, the routing parameters, and the expectations. Node
-coordinates are assigned automatically along a line, so nodes are identified by name and route
-results are reported back as name sequences.
+A scenario is a DOT file holding a graph, the routing parameters, and the expectations. Nodes are
+identified by name and route results are reported back as name sequences. Node coordinates are
+either declared in metres or assigned automatically along a line.
 
 Complete reference — everything `loadScenario` understands.
 
@@ -183,10 +184,12 @@ Complete reference — everything `loadScenario` understands.
 |---|---|---|---|
 | `description` | string | `""` | One-line summary, shown nowhere but read by everyone |
 | `start` | node name | first edge's left node | Where routing begins |
-| `end` | node name | — | **When set, switches to one-way routing** (Dijkstra) instead of random walks |
+| `end` | node name | — | **When set, switches to one-way routing** (A*) instead of explore |
 | `minDist` | number | `100` | Minimum acceptable route length, metres |
 | `maxDist` | number | `100000` | Maximum acceptable route length, metres |
-| `roundTrip` | `"true"` | false | Use the round-trip walk. Ignored when `end` is set |
+| `roundTrip` | `"true"` | false | Use the round-trip strategy. Ignored when `end` is set |
+
+Round trips take a seed; the test runner pins `SCENARIO_SEED = 1` for every scenario.
 
 **Expectations** — also graph attributes:
 
@@ -205,10 +208,24 @@ Complete reference — everything `loadScenario` understands.
 
 | Attribute | Type | Default | Meaning |
 |---|---|---|---|
-| `distance` | number | `0` | Edge length in metres |
+| `distance` | number | `0`, or the crow-flies distance between positioned nodes | Edge length in metres |
 | `type` | `lane` / `gap` | lane | Only the exact string `gap` marks a gap edge; anything else is a lane |
+| `barrier` | `major_road` / `railway` / `water` | — | Marks a gap that crosses a barrier; it costs 50× |
 
 Edges are written with `--` (the graph is undirected). `//` comments are stripped before parsing.
+
+**Node attributes** — inside `A [ ... ]`, optional:
+
+| Attribute | Type | Meaning |
+|---|---|---|
+| `x`, `y` | number | Metres east and north of the origin, on the equator |
+
+Use positions when the geometry matters — the round-trip strategy casts far points by bearing,
+and the A* heuristic measures straight lines — as `round-trip-spurs.dot` and `grid-heuristic.dot`
+do. Position every node or none. Unpositioned nodes go on a line whose whole length is at most
+the shortest edge, so the straight-line distance between any two nodes never exceeds a path
+between them and the heuristic stays admissible; the loader refuses a line that would need nodes
+closer than the snapping grid, which is its way of saying "give this scenario positions".
 
 ### 4.3 Anatomy of a good scenario
 
@@ -281,10 +298,12 @@ the rest are gaps in the current suite and are worth adding as you go.
 
 - ✅ Straight chain — `simple-chain.dot`
 - ✅ Fork into two valid branches — `branching.dot`
-- ✅ Dead-end branch the walk must back out of — `dead-end.dot`
+- ✅ Dead-end branch the router must not end in — `dead-end.dot`
 - ✅ Disconnected components — `isolated-lanes.dot`
 - ✅ Cycle returning to start — `round-trip.dot`
 - ✅ Gap edge as the only connection — `gap-bridging.dot`
+- ✅ Loop whose every node offers a dead end — `round-trip-spurs.dot`
+- ✅ Lollipop: the only way home repeats an edge, so no loop — `round-trip-lollipop.dot`
 - ⬜ Start node with no edges at all
 - ⬜ Single-node graph
 - ⬜ Parallel edges between the same pair — currently dropped ([21](../backlog/21-dropped-lanes.md))
@@ -294,8 +313,7 @@ the rest are gaps in the current suite and are worth adding as you go.
 
 - ⬜ Route lands exactly on `minDist`
 - ⬜ Best route falls just under `minDist` — must be rejected
-- ⬜ A single edge longer than `maxDist − minDist` — must not overshoot
-  ([11](../backlog/11-explore-distance-bounds.md))
+- ✅ A single edge longer than `maxDist − minDist` — must not overshoot — `overshoot.dot`
 - ⬜ `minDist = 0`
 - ⬜ `minDist == maxDist`
 
@@ -334,17 +352,20 @@ So a scenario whose only assertion is `expect_minCoverage = 0.8` passes when the
 broken enough to return nothing at all. **Always pair a behavioural expectation with
 `expect_route` or `expect_minRoutes`.**
 
-**Flaky expectations under randomness.** Explore and round-trip are random walks, retried
-`N_ATTEMPTS = 80` times per start candidate. On a six-node graph with two branches, the chance of
-missing a path is about `2 × 2⁻⁸⁰` — zero in practice. On a graph with wide fan-out or long
-paths, 80 attempts stop being exhaustive and `expect_route` starts failing intermittently.
+**Expecting every route on a graph with many.** All three strategies are deterministic, so a
+scenario never flakes; but explore returns at most one route per bearing sector and round-trip at
+most one per bearing, and each picks by a rule (nearest the middle of the distance range; the
+node nearest the far point). A graph with many valid routes gets a subset of them, chosen by rules
+a scenario should not depend on.
 
 - Keep scenarios small, and `expect_route` stays safe.
 - If more than roughly five distinct valid routes exist, use `expect_any_route` or
   `expect_minRoutes` instead of demanding every sequence.
-- One-way mode (`end` set) is deterministic Dijkstra — prefer exact `expect_route` there. But
-  when two paths tie on length, which one wins is an implementation detail: use
-  `expect_any_route`, as `one-way-branching.dot` does.
+- A loop and its mirror image are the same ride and only one is returned: list both under
+  `expect_any_route`, as `round-trip.dot` does.
+- One-way mode (`end` set) is A* — prefer exact `expect_route` there. But when two paths tie on
+  cost, which one wins is an implementation detail: use `expect_any_route`, as
+  `one-way-branching.dot` does.
 
 ### 4.7 The `geo-to-graph` layer
 

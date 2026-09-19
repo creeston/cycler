@@ -71,14 +71,15 @@ export function buildRoute(
   let entry = cachedEntry(key)
 
   if (!entry || entry.routes.length === 0) {
-    const found = findRoutes(lanes, preferences, barriers ?? undefined)
+    const options = { barriers: barriers ?? undefined }
+    const found = findRoutes(lanes, preferences, options)
     if (found.length === 0) {
       const hasDestination = preferences.endLon !== undefined && preferences.endLat !== undefined
       if (hasDestination) {
         const [unrestrictedRoute] = findRoutes(
           lanes,
           { ...preferences, minDistanceMeters: 0, maxDistanceMeters: Number.MAX_SAFE_INTEGER },
-          barriers ?? undefined,
+          options,
         )
         if (unrestrictedRoute) {
           const distance = formatKilometers(unrestrictedRoute.totalDistanceMeters)

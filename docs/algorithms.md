@@ -276,8 +276,9 @@ falls from 181.4 km to 27.0 km, against 37.1 km of real bike lane.
 
 `MAX_GAP_EDGES_PER_NODE = 2`. Connectivity cannot choose k — every value gives the same component
 count — so k was chosen on **route diversity**. The counts below are distinct routes from the
-integration fixture's start point over 2–10 km, averaged across 10 seeded runs of the walks, with
-the mean bike-lane coverage of those routes:
+integration fixture's start point over 2–10 km, averaged across 10 seeded runs of the random
+walks that were the router at the time (since replaced, §5), with the mean bike-lane coverage of
+those routes:
 
 | Variant | Gap edges | Explore routes | Coverage | Round-trip routes | Coverage | Seeds with ≥ 3 round-trip routes |
 |---|---|---|---|---|---|---|
@@ -348,10 +349,10 @@ of `distanceMeters × BARRIER_COST_MULTIPLIER`. Marking keeps a wrongly flagged 
 fragmenting the network into "no route found", which is a worse failure than a flagged route.
 The two routing paths honour the mark differently:
 
-- The walks (§5.1, §5.2) pick from the best non-empty tier: bike lanes, then clean gaps, then
-  flagged gaps. A flagged gap is taken only when a node offers nothing else.
-- Dijkstra (§5.3) minimises `costMeters`, so a flagged gap loses to any detour up to 50× its
+- Every search (§5) minimises `costMeters`, so a flagged gap loses to any detour up to 50× its
   length. Distance bounds are still checked against real length.
+- Explore and round-trip (§5.1, §5.2) then drop a route that crosses a flagged gap while any
+  clean route was found from the same start, so such a route is offered only as a last resort.
 
 Geometry uses a uniform grid over barrier segments (cells of 0.002°, about 220 m) and an exact
 segment-segment intersection test rather than `turf.lineIntersect`, which would allocate a
@@ -425,7 +426,8 @@ reason the factor grows with length rather than staying flat.
 
 #### Choosing the factor
 
-Measured on the Warsaw fixture from the integration start point, 2–10 km, mean of 10 seeded runs.
+Measured on the Warsaw fixture from the integration start point, 2–10 km, mean of 10 seeded runs
+of the random walks that were the router at the time (since replaced, §5).
 `cover%` is mean bike-lane coverage across the batch, `barrier%` the share of routes containing a
 flagged gap:
 
@@ -583,95 +585,142 @@ interface RoutingStrategy {
 ```
 
 `buildStrategy` selects among them: `endKey` present → one-way; else `roundTrip` → round-trip;
-else explore.
+else explore. All three are built on two searches in `search.ts`, and none of them draws a random
+number while it runs: the only randomness left is a seed that rotates the round-trip bearing fan
+(§5.2), so `findRoutes(lanes, preferences, { seed })` always returns the same batch for the same
+inputs.
 
-### 5.1 Explore — self-avoiding random walk
+### 5.0 The two searches
 
-A **node-disjoint** walk (a simple path). `visited` is seeded with the start node, so an explore
-route can never return to its origin.
-
-```
-current ← start;  total ← 0;  visited ← {start}
-while total < maxDist:
-    N ← neighbours(current) \ visited
-    if N = ∅: return null
-    next ← weighted_random( N, w(e) = d(e)/cost(e) )   // flagged gaps only if N has nothing else
-    total ← total + w(current, next)
-    emit segment
-    visited ← visited ∪ {next};  current ← next
-    if total ≥ minDist: return segments
-return null
-```
-
-**How the next step is chosen.** `chooseNeighbour` draws from the available edges with weight
-`distanceMeters / costMeters` — the reciprocal of the cost premium, so a lane weighs 1 and a gap
-weighs `1/p(d)` (§3.3.5). Dividing by length matters: weighing raw cost would make the walk prefer
-short lanes over long ones, which has nothing to do with the premise.
-
-Gaps that cross a barrier stay out of the draw and are used only when a node offers nothing else.
-Their premium would still give them a small chance at every junction, and "crosses an arterial
-where you cannot cross, 2 % of the time" is not a trade the premise allows.
-
-The choice is still local and greedy: it says nothing about the total gap distance of the finished
-route.
-
-**Distance bounds.** The loop guard is evaluated *before* the edge is appended, and the function
-returns the instant `total ≥ minDist`. Therefore the returned total satisfies
+**A\*** (`astar`) finds the cheapest path from one node to another over `costMeters`, popping
+nodes from a binary heap in order of `g(n) + h(n)`. With `h = 0` it is Dijkstra; the app passes
+`haversineTo(goal)`:
 
 $$
-\text{minDist} \le \text{total} < \text{minDist} + \ell_{\max}
+h(n) = \text{haversine}(n, \text{goal})
 $$
 
-where `ℓmax` is the length of the final edge. It can exceed `maxDist` whenever
-`ℓmax > maxDist − minDist`. With the defaults (10 km / 30 km) that needs a single 20 km edge and
-never happens; with a narrow range it will. `maxDist` is a loop guard, not a guarantee —
-[`11-explore-distance-bounds`](../backlog/11-explore-distance-bounds.md).
+It is admissible because every edge costs at least its length (`costMeters = d · p · β` with
+`p, β ≥ 1`, §3.3.5) and every length is at least the straight line between its ends. It is the
+*lane* multiplier of 1 that makes this safe. Scaling `h` by the gap penalty would guide the search
+harder, but a node's remaining path might be all lane, and an overestimate there can skip the
+cheapest route — so the heuristic stays at the minimum edge multiplier and gives up some guiding
+power. Haversine rather than `approxMeters` (§2.2) because the approximation can overshoot the
+great-circle distance by a fraction of a percent, which is enough to break a tie the wrong way.
 
-**Success probability.** Undefined in closed form; the walk fails whenever it paints itself into
-a dead end before reaching `minDist`. Compensated by brute force: `N_ATTEMPTS = 80` walks per
-start candidate.
+The heuristic is consistent (triangle inequality), so a node is final the first time it is popped
+and is never reopened. `astar` also reports how many nodes it settled; `grid-heuristic.dot` uses
+that to pin the gain: across a 7 × 7 grid of 100 m lanes, the guided search settles 6 nodes to
+Dijkstra's 33 for the same path.
 
-### 5.2 Round-trip — edge-disjoint random walk
+An optional `edgeCostFactor` multiplies chosen edges' cost for one search. The round-trip return
+leg uses it (§5.2).
 
-A **trail**: edges may not repeat, nodes may. Terminates when the walk arrives back at the start.
+**The bounded shortest-path tree** (`shortestPathTree`) is Dijkstra over `costMeters` from one
+node to every node reachable within `maxDist` of *real* length, returned as a parent map with each
+node's cost, distance and the number of flagged gaps on its path. An edge is not relaxed when it
+would carry the path past `maxDist`, so a node is reached by the cheapest path among those that
+stay within the bound at every step. (A node reachable within the bound only by a dearer path
+than the one that settled it can be missed; the bound is a pruning rule, not a bi-criteria
+search.)
+
+### 5.1 Explore — a destination in every direction
+
+Explore has no goal to aim a heuristic at, so it runs the tree once and chooses where to go from
+what the tree found:
 
 ```
-current ← start;  total ← 0;  usedEdges ← ∅
-loop:
-    if segments ≠ ∅ and current = start:
-        return total ≥ minDist ? segments : null
-    A ← { n ∈ neighbours(current) : edge(current,n) ∉ usedEdges }
-    if A = ∅: return null
-    next ← weighted_random( A, w(e) = d(e)/cost(e) )   // as §5.1
-    if total + w(current, next) > maxDist: return null
-    total ← total + w;  usedEdges ← usedEdges ∪ {edge};  emit segment
-    current ← next
+tree ← shortestPathTree(start, maxDist)
+candidates ← { n ∈ tree : n ≠ start, dist(n) ≥ minDist }
+if any candidate has no flagged gap on its path: drop those that do     // last resort rule
+sort candidates by bearing from start
+split into MAX_EXPLORE_ROUTES sectors of equal count
+for each sector: pick the candidate whose dist is nearest (minDist + maxDist) / 2
+drop any pick that lies on the tree path of another pick
+return the tree path to each remaining pick
 ```
 
-Two differences from explore are worth calling out:
+Three consequences:
 
-- **`maxDist` is a genuine hard bound here.** The candidate edge is tested *before* it is taken.
-- **First return wins.** The walk is abandoned the moment it touches the start node again, even
-  if the loop so far is only 800 m of a requested 10 km. It cannot pass *through* the start and
-  keep going, which discards a large family of legitimate figure-of-eight and multi-lobe loops.
+- **Both distance bounds hold.** `minDist` by selection, `maxDist` by construction of the tree.
+  `overshoot.dot` pins the upper bound, which the random walk this replaced did not keep
+  ([`11`](../backlog/done/11-explore-distance-bounds.md)).
+- **Every route is the cheapest way to where it goes.** The tree minimises cost, so an explore
+  route uses a gap only when no lane path reaches its destination or the lane path costs more than
+  5–10× the gap's length. On the Warsaw fixture from the integration start, every route in the
+  2–10 km range stays entirely on lanes.
+- **The rule for flagged gaps is a filter, not a draw.** The walk used to keep barrier-crossing
+  gaps out of the random choice until nothing else was left; here a destination whose path crosses
+  one is dropped while a clean destination exists (`barrier-last-resort.dot`).
 
-Closure is left entirely to chance — nothing steers the walk homeward. This is where a
-distance-aware heuristic would pay off most; see
-[`02-astar-routing`](../backlog/02-astar-routing.md).
+Sectors are quantiles of bearing, not fixed angles, so a start on the edge of the loaded area
+still gets its share of routes. A sector's pick is the candidate nearest the middle of the range,
+which is the reading of "10–30 km" a rider expects.
 
-### 5.3 One-way — bidirectional Dijkstra
+### 5.2 Round-trip — a far point and two legs
 
-Point-to-point routing delegates to `graphology-shortest-path`:
+A loop of length `L` is roughly a circle of circumference `L`, whose diameter is `L / π`. So the
+strategy casts a far point that far from the start, snaps it to the nearest node, rides out to it
+and finds a different way back:
 
-```ts
-dijkstra.bidirectional(graph, startKey, endKey, 'costMeters')
+```
+tree ← shortestPathTree(start, maxDist)          // outbound legs, shared by every bearing
+D ← (minDist + maxDist) / 2 / π
+offset ← seededRandom(seed)() · (360 / N_BEARINGS)
+for i in 0 … N_BEARINGS − 1:
+    far ← nearestNode( destinationPoint(start, D, offset + i · 360 / N_BEARINGS) )
+    if far = start or far ∉ tree or far already tried: continue
+    out ← tree path to far
+    back ← astar(far, start, h = haversineTo(start), edges of out cost × RETRACE_COST_FACTOR)
+    cut the shared tail where back retraces the end of out
+    if any other edge of back is in out: continue         // no loop keeps the promise
+    loop ← out + back
+    if minDist ≤ length(loop) ≤ maxDist: emit loop
+if any emitted loop has no flagged gap: drop those that do
 ```
 
-`costMeters` is the edge length for everything except a gap flagged by the barrier veto, which
-costs 50× its length (§3.3.4). All weights are non-negative, so Dijkstra's optimality holds — over
-cost, not distance. The distance filter below still uses real length. Bidirectional
-search expands from both ends and meets in the middle: same `O((|V| + |E|) log |V|)` bound, but
-typically `√` the explored node count of the unidirectional version.
+**The return leg is edge-disjoint by construction, with one exception it repairs.** The outbound
+edges are not forbidden but priced at `RETRACE_COST_FACTOR = 1 000` times their cost, so the
+return uses one only where nothing else leads home. That happens when the far point snaps to a
+dead end: the return has to ride back down the spur. `closeLoop` cuts that shared tail off both
+legs, which moves the far point back to the last junction, and rejects the loop if any other edge
+repeats. `round-trip-spurs.dot` exercises the repair (every node of a ring has a spur, and the far
+point often lands on one); `round-trip-lollipop.dot` pins the rejection (the only way home
+repeats the stick, so no loop is returned).
+
+**Where it cannot help.** A start with no non-bridge edge is on no cycle at all, whatever the
+search. On the Warsaw fixture at 200 m that is 14 of a 36-node sample; the strategy closes a
+2–10 km loop from 55.6 % of the sample against that ceiling of 61.1 % (the rest lie on cycles
+outside the band), and from 13 of the 14 start candidates near the integration start — the
+fourteenth is on no cycle. At the 1 000 m fallback tolerance it reaches the ceiling exactly,
+80.6 %. The random walk managed 21.3 % of the sample and 18.6 % near the start at 200 m.
+
+**Choosing `N_BEARINGS`.** Measured on the fixture, 2–10 km, 36 sampled starts × 5 seeds:
+
+| Bearings | Starts with a loop | Loops per start | ms per start |
+|---|---|---|---|
+| 4 | 43.9 % | 0.93 | 0.61 |
+| 8 | 53.3 % | 1.65 | 0.94 |
+| **12** | **55.6 %** | **2.14** | **1.34** |
+| 16 | 55.6 % | 2.41 | 1.59 |
+| 24 | 55.6 % | 2.77 | 1.91 |
+
+Success saturates at 12; beyond that only near-duplicate loops are added. (Measured with an A*
+per outbound leg; sharing the legs through one tree then brought 12 bearings to 0.80 ms per
+start.)
+
+**What the seed does.** It rotates the fan by up to one step, so two seeds cast at different
+points and usually find different loops; with the same seed the loops are identical. It does not
+otherwise enter the search.
+
+### 5.3 One-way — A\*
+
+Point-to-point routing is one `astar` call from each start candidate to `endKey`, with
+`haversineTo(endKey)` as the heuristic. `costMeters` is the edge length for a lane, 5–10× it for
+a gap and 50× that again for a gap flagged by the barrier veto (§3.3.4–3.3.5). All weights are
+non-negative and the heuristic is admissible, so the path is the cheapest — over cost, not
+distance. The distance filter below still uses real length, and `findRoutes` keeps only the
+shortest of the per-candidate results.
 
 The result is then **filtered**, not constrained:
 
@@ -679,9 +728,9 @@ The result is then **filtered**, not constrained:
 if total < minDist or total > maxDist: return null
 ```
 
-Dijkstra minimises length, so if the shortest path is 3 km and `minDistanceMeters` is 10 km, the
-answer is "no route" — even though longer valid paths exist in abundance. A minimum-distance
-*constraint* is a different problem (it is NP-hard in general) and is not attempted.
+A* minimises cost, so if the cheapest path is 3 km and `minDistanceMeters` is 10 km, the answer is
+"no route" — even though longer valid paths exist in abundance. A minimum-distance *constraint* is
+a different problem (it is NP-hard in general) and is not attempted.
 
 Note also that `endKey` is resolved with `nearestNode` (§2.3), so a one-way route ends at the
 nearest lane endpoint to the tap, not at the tap itself.
@@ -695,15 +744,20 @@ nearest lane endpoint to the tap, not at the tap itself.
 
 | | Explore | Round-trip | One-way |
 |---|---|---|---|
-| Walk class | simple path (node-disjoint) | trail (edge-disjoint) | shortest path |
-| Determinism | random | random | deterministic |
+| Search | one bounded tree | one bounded tree + A* per bearing | A* |
+| Determinism | deterministic | deterministic for a seed | deterministic |
 | Returns to start | never | always | no |
 | `minDist` | guaranteed | guaranteed | filter only |
-| `maxDist` | soft (§5.1) | hard | filter only |
-| Prefers lanes | weighted, per step | weighted, per step | by cost |
-| Avoids flagged gaps | last tier only | last tier only | 50× cost penalty |
-| Attempts | 80 per candidate | 80 per candidate | 1 per candidate |
-| Complexity | `O(N_ATTEMPTS · path length)` | `O(N_ATTEMPTS · trail length)` | `O((V+E) log V)` |
+| `maxDist` | guaranteed | guaranteed | filter only |
+| Prefers lanes | by cost | by cost | by cost |
+| Avoids flagged gaps | 50× cost, then filtered out while a clean route exists | same | 50× cost |
+| Routes per candidate | ≤ `MAX_EXPLORE_ROUTES` | ≤ `N_BEARINGS` | 1 |
+| Complexity | `O((V+E) log V)` | `O(N_BEARINGS · (V+E) log V)` | `O((V+E) log V)` |
+
+On the Warsaw fixture from the integration start, 2–10 km, `findRoutes` wall time (median of 7,
+graph build included) went from 14 ms to 8 ms for explore (96 → 126 routes), 16 ms to 20 ms for
+round trips (7 → 60 routes, none needing the fallback), and 6 ms to 5 ms for one-way; at 10–30 km
+explore went from 39 ms to 16 ms and round trips from 97 ms to 40 ms.
 
 ---
 
@@ -811,7 +865,7 @@ An honest list of the modelling assumptions, in rough order of how much they dis
 | 3 | Gap edges are **straight lines**, now tested against barriers | A gap that crosses a major road, railway or waterway away from a crossing is flagged and made expensive (§3.3.4), and lanes on different levels are never bridged. What survives is still a straight line: its distance is the crow-flies distance, not the ride. | [01](../backlog/done/01-gap-penalty-and-tolerance.md) |
 | 4 | A gap costs 5–10× its length, the same premium on every kind of road | The premise is now in the cost function (§3.3.5), but one number covers a quiet residential street and a four-lane arterial alike. Level of Traffic Stress is the established model, and its own task. | — |
 | 5 | The graph is undirected | `oneway=yes`, contraflow lanes and one-way cycle tracks are ignored. | — |
-| 6 | No heuristic guides the search | Round-trip closure and explore direction are pure chance; 80 attempts stand in for a distance-aware objective. | [02](../backlog/02-astar-routing.md) |
+| 6 | A loop is a circle; an explore route ends at the middle of the range | The far point sits at `L/π` from the start on a straight bearing, so a loop through a long thin network is missed when no node is near that point, and a start on no cycle gets no loop at all (§5.2). Explore picks the destination nearest `(min + max) / 2` in each sector, never the prettiest. | [02](../backlog/done/02-astar-routing.md) |
 | 7 | `laneType` and `surface` are parsed but unused | A `shared_lane` on a four-lane road weighs exactly the same as a segregated `cycleway`; cobbles weigh the same as asphalt. | [05](../backlog/05-route-preferences-ui.md) |
 | 8 | No elevation model | Distance is the only cost. A 12 % climb is free. | — |
 | 9 | Routes start and end at graph nodes | The start point snaps to a lane endpoint or junction, potentially hundreds of meters away; you cannot begin mid-lane. Splitting long lanes at a fixed interval would make this finer. | [29](../backlog/29-start-point-selection.md) |
@@ -830,7 +884,7 @@ graph LR
     G1 -->|compare| DOT1["*.expected.dot<br/>node & edge structure"]
 
     DOT2["scenarios/graph-to-path/*.dot<br/>graph + start/end/minDist/maxDist<br/>+ expect_* assertions"] -->|loadScenario| G2["BikeLaneGraph<br/>synthetic coordinates"]
-    G2 -->|runWalks / runOneWay| R["Route[]"]
+    G2 -->|runExplore / runRoundTrip / runOneWay| R["Route[]"]
     R -->|compare| DOT2
 
     FC["scenarios/overpass-data.geojson<br/>real Warsaw Bemowo export"] -->|findRoutes| INT["integration/routing.test.ts"]
@@ -847,9 +901,12 @@ Three layers, deliberately separated:
   both the graph and its assertions as graph attributes (`start`, `end`, `minDist`, `maxDist`,
   `roundTrip`, `expect_route`, `expect_any_route`, `expect_isRoundTrip`, `expect_minRoutes`,
   `expect_hasGap`, `expect_minCoverage`, …). An edge may carry `barrier=<kind>` to stand in for a
-  flagged gap. Synthetic node coordinates are assigned along a line so that route node sequences
-  can be reconstructed and compared by name. Covers chains, forks, dead ends, isolated
-  components, gap traversal, loops, point-to-point, and both ways of avoiding a flagged gap.
+  flagged gap. A node may carry `x`/`y` positions in metres, from which an edge's length defaults;
+  nodes without one are placed along a line short enough to keep the A* heuristic admissible.
+  Either way route node sequences can be reconstructed and compared by name. Covers chains,
+  forks, dead ends, isolated components, gap traversal, loops, the distance ceiling,
+  point-to-point, a loop through a ring of dead ends, a lollipop that has no loop, both ways of
+  avoiding a flagged gap, and the node count A* saves against Dijkstra.
 - **`integration`** — a real Overpass export of Warsaw Bemowo driven through `findRoutes`,
   asserting loop closure, distance bounds, segment-type validity and non-zero lane distance.
   `gap-tolerance.test.ts` checks the promise made about `maxGapMeters` — no returned route
@@ -867,7 +924,7 @@ Three layers, deliberately separated:
 Each `.dot` file opens with an ASCII sketch of the graph it encodes, which makes the fixtures
 reviewable without running them.
 
-**Current coverage: 197 tests, all passing.** The gaps are above the domain line — no tests for
+**Current coverage: 206 tests, all passing.** The gaps are above the domain line — no tests for
 the stores, hooks, Overpass client, IndexedDB cache or GPX writer
 ([`22-use-case-tests`](../backlog/22-use-case-tests.md)).
 
@@ -879,7 +936,9 @@ Every tuning constant in the routing path, in one place.
 
 | Constant | Value | Location | Meaning |
 |---|---|---|---|
-| `N_ATTEMPTS` | 80 | `route-finder.ts` | Random walks per start candidate |
+| `N_BEARINGS` | 12 | `route-finder.ts` | Far points cast per start candidate for a round trip; chosen by the measurement in §5.2 |
+| `MAX_EXPLORE_ROUTES` | 12 | `route-finder.ts` | Bearing sectors, and so routes, per start candidate in explore |
+| `RETRACE_COST_FACTOR` | 1 000 | `route-finder.ts` | What the return leg pays to reuse an outbound edge |
 | `EXPANDED_GAP_METERS` | 1 000 | `route-finder.ts` | Gap tolerance used by the fallback pass |
 | `MIN_ROUTES_BEFORE_EXPAND` | 3 | `route-finder.ts` | Threshold that triggers the fallback |
 | `MAX_GAP_EDGES_PER_NODE` | 2 | `graph.ts` | Gap edges kept per node; chosen by the measurement in §3.3.3 |
