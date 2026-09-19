@@ -8,9 +8,12 @@
  *
  * buildGraphUnpruned at the bottom of this file is the pre-pruning algorithm,
  * kept as the baseline to compare against.
+ *
+ * Since lanes are split at shared vertices (task 09) the lane graph alone is
+ * almost connected, so at the default 200 m only a handful of gaps survive;
+ * the numbers below are re-measured from that state.
  */
 import { describe, it, expect, beforeAll, afterEach } from 'vitest'
-import Graph from 'graphology'
 import { readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
@@ -18,7 +21,6 @@ import type { FeatureCollection } from 'geojson'
 import { geojsonToBikeLanes } from '~/domain/mappers/osm-to-domain'
 import { buildGraph, getGapStats, nodesWithinMeters } from '~/domain/routing/graph'
 import type { BikeLaneGraph } from '~/domain/routing/graph'
-import { coordKey } from '~/domain/routing/algorithms'
 import { osmLevel } from '~/domain/mappers/osm-to-barriers'
 import { runWalks } from '~/domain/routing/route-finder'
 import type { BikeLane } from '~/domain/entities/bike-lane'
@@ -76,7 +78,8 @@ describe('gap pruning — Warsaw overpass data', () => {
   )
 
   it('reports candidates, kept edges and the reason for each drop', () => {
-    const graph = buildGraph(lanes, 200)
+    // At 200 m no node reaches the per-node limit (6 gaps kept); 500 m exercises every rule.
+    const graph = buildGraph(lanes, 500)
     const stats = getGapStats(graph)
 
     expect(stats.kept).toBe(countGapEdges(graph))
@@ -91,13 +94,15 @@ describe('gap pruning — Warsaw overpass data', () => {
   })
 
   it('still finds many distinct explore routes', () => {
-    // Measured over 10 seeds: 118.5 routes on average, never below 3.
+    // Measured over 10 seeds: 107.6 routes on average, never below 97.
     expect(countRoutes(buildGraph(lanes, 200), false)).toBeGreaterThan(20)
   })
 
-  it('still finds many distinct round-trip routes', () => {
-    // Measured over 10 seeds: 28.5 routes on average, never below 3.
-    expect(countRoutes(buildGraph(lanes, 200), true)).toBeGreaterThan(5)
+  it('still finds many distinct round-trip routes at the expanded tolerance', () => {
+    // At 200 m the honest lane graph has few cycles: 3.2 loops on average over
+    // 10 seeds, 0 in the worst seed, so the finder widens to 1 000 m.
+    // Measured there over 10 seeds: 19.8 routes on average, never below 16.
+    expect(countRoutes(buildGraph(lanes, 1_000), true)).toBeGreaterThan(5)
   })
 })
 
@@ -188,43 +193,26 @@ function approxMeters(lon1: number, lat1: number, lon2: number, lat2: number): n
 }
 
 /**
- * The pre-pruning graph builder: every endpoint pair within maxGapMeters that
- * no lane edge joins becomes a gap edge. Distances use straight lines rather
- * than turf.length, which is enough for a connectivity baseline.
+ * The pre-pruning graph builder: every node pair within maxGapMeters that no
+ * lane edge joins becomes a gap edge. Lane edges come from buildGraph itself,
+ * so the baseline shares the lane splitting and the comparison isolates pruning.
  *
  * It applies one rule that is not pruning: lanes on different levels are never
  * bridged (task 28). That is a correctness rule about what a connection is, so
- * the baseline has to honour it for the comparison to isolate pruning.
+ * the baseline has to honour it. Levels are read back from the lane edges.
  */
 function buildGraphUnpruned(lanes: BikeLane[], maxGapMeters: number): BikeLaneGraph {
-  const graph: BikeLaneGraph = new Graph({ type: 'undirected', multi: false })
+  const graph = buildGraph(lanes, 0)
 
   const levels = new Map<string, Set<number>>()
-
-  for (const lane of lanes) {
-    const coords = lane.geometry.coordinates
-    const last = coords[coords.length - 1]
-    const startKey = coordKey(coords[0][0], coords[0][1])
-    const endKey = coordKey(last[0], last[1])
-    graph.mergeNode(startKey, { lon: coords[0][0], lat: coords[0][1] })
-    graph.mergeNode(endKey, { lon: last[0], lat: last[1] })
-
-    const level = osmLevel(lane.tags)
-    for (const key of [startKey, endKey]) {
+  graph.forEachEdge((_key, attrs, source, target) => {
+    const level = osmLevel(attrs.tags ?? {})
+    for (const key of [source, target]) {
       const known = levels.get(key)
       if (known) known.add(level)
       else levels.set(key, new Set([level]))
     }
-    if (startKey !== endKey && !graph.hasEdge(startKey, endKey)) {
-      const distanceMeters = approxMeters(coords[0][0], coords[0][1], last[0], last[1])
-      graph.addEdge(startKey, endKey, {
-        distanceMeters,
-        costMeters: distanceMeters,
-        isGap: false,
-        geometry: lane.geometry,
-      })
-    }
-  }
+  })
 
   const nodes = graph.nodes()
   const attrs = nodes.map(key => graph.getNodeAttributes(key))

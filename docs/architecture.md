@@ -324,7 +324,7 @@ Each is a task in [`/backlog`](../backlog/README.md).
 | Gap | Impact | Task |
 |---|---|---|
 | Gap edges are unweighted; tolerance is silently widened | The core bike-lane-first guarantee is not enforced | [01](../backlog/done/01-gap-penalty-and-tolerance.md) |
-| Graph nodes exist only at lane **endpoints** | Lanes meeting mid-way are never connected; the network is more fragmented than reality | [09](../backlog/09-mid-lane-junctions.md) |
+| Graph nodes exist only where lanes **share a vertex** | Lanes that cross without a shared OSM node are not connected | follow-up of [09](../backlog/done/09-mid-lane-junctions.md) |
 | Gap detection is O(n²) over all nodes | City-scale fetches block the main thread for seconds | [16](../backlog/16-spatial-index.md), [17](../backlog/17-web-worker.md) |
 | Distance preferences have no UI | Distance configuration is unreachable | [05](../backlog/05-route-preferences-ui.md) |
 | Overpass has one endpoint, no retry, no abort | A 429 or 504 surfaces as a raw error and loses the request | [18](../backlog/18-overpass-resilience.md) |

@@ -1,0 +1,15 @@
+// Lane 1 runs A → C with an interior vertex at B (0.001, 0.000).
+// Lane 2 starts at that same vertex. B is a junction even though it is not
+// an endpoint of lane 1, so buildGraph must split lane 1 there.
+//
+//         D
+//         ║ lane-2
+//   ══════ B ══════ C
+//   lane-1 (one OSM way)
+//   A
+//
+graph t_junction {
+  A -- B [type=lane]
+  B -- C [type=lane]
+  B -- D [type=lane]
+}

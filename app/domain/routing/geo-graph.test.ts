@@ -48,4 +48,8 @@ describe('geo to graph conversion scenarios', () => {
   it('round-trip: three lanes forming a closed triangle produce 3 nodes and 3 lane edges', () => {
     checkGeoGraph(loadGeoGraphScenario(geojson('round-trip'), expectedDot('round-trip')))
   })
+
+  it('t-junction: a lane ending at an interior vertex of another is joined there', () => {
+    checkGeoGraph(loadGeoGraphScenario(geojson('t-junction'), expectedDot('t-junction')))
+  })
 })

@@ -123,33 +123,68 @@ Tracked as [`13-nearest-node-metric`](../backlog/13-nearest-node-metric.md).
 
 ### 3.1 Vertices
 
+Let `J` be the set of **junction keys**: snapped coordinates at which two or more distinct lanes
+have a vertex, anywhere along the polyline, not only at its ends.
+
 $$
 V = \bigl\{\, \text{coordKey}(p_0^{(\ell)}),\ \text{coordKey}(p_{n-1}^{(\ell)}) \ :\ \ell \in L \,\bigr\}
+\ \cup\ J
 $$
 
-Only the **first and last** vertex of each lane polyline become graph nodes. Interior vertices
-are carried along inside the edge geometry but are invisible to the router.
+The first and last vertex of every lane become nodes, and so does every interior vertex that
+another lane also passes through or ends at. A lane ending at the midpoint of another lane is
+joined to it there (a T-junction), and two lanes sharing a vertex where they cross are joined at
+the crossing. Interior vertices that no other lane touches stay inside the edge geometry.
 
-Each node stores `{ lon, lat }` — the *raw*, unsnapped coordinate of whichever lane most
+Two lanes that cross **without** a shared vertex still produce no node: detecting that needs a
+geometric intersection test and the `layer` / `bridge` / `tunnel` tags to tell a crossing from an
+overpass, and is left to a follow-up of [`09`](../backlog/done/09-mid-lane-junctions.md).
+
+Each node stores `{ lon, lat }` — the *raw*, unsnapped coordinate of whichever lane piece most
 recently merged that node.
 
 ### 3.2 Lane edges
 
-For each lane `ℓ` with endpoint keys `(u, v)`:
+Each lane is cut at its junction vertices (`splitAtJunctions`) into one or more **pieces**; a lane
+with no interior junction is one piece. Consecutive vertices that fall inside the same snapping
+cell count as one junction, cut at the first of them, so no sub-metre piece is created and no
+length is lost. For each piece `π` with endpoint keys `(u, v)`:
 
 $$
 (u,v) \in E \iff u \neq v \ \wedge\ (u,v) \notin E \ \text{already}
 $$
 
-with attributes `{ distanceMeters: turf.length(ℓ), isGap: false, geometry: ℓ }`.
+with attributes `{ distanceMeters: turf.length(π), isGap: false, geometry: π, laneType, surface,
+tags }`, the last three copied from the parent lane. `distanceMeters` is the length of the piece's
+own geometry, so the sum over all lane edges equals the sum of `turf.length` over the input lanes
+(37 098 m on the Warsaw fixture, exactly).
 
-Two lanes are silently discarded by this rule:
+Two kinds of piece are silently discarded by this rule:
 
-- **Closed loops** (`u = v`): a park circuit tagged as a single way disappears entirely.
-- **Parallel lanes**: a second, longer way between the same two snapped endpoints is dropped,
-  and the first one ingested wins regardless of length.
+- **Closed loops** (`u = v`): a park circuit tagged as a single way with no other lane touching it
+  disappears entirely. A loop that another lane touches inside is now split there and kept.
+- **Parallel pieces**: a second way between the same two snapped nodes is dropped, and the first
+  one ingested wins regardless of length.
 
 See [`21-dropped-lanes`](../backlog/21-dropped-lanes.md).
+
+#### What splitting did on the Warsaw Bemowo fixture
+
+| | Endpoints only | Split at junctions |
+|---|---|---|
+| Nodes | 358 | 360 |
+| Lane edges | 310 | 378 |
+| Connected components, lanes only | **52** | **5** |
+| Gap edges at 200 m | 441 | **6** |
+| Connected components at 200 m | 5 | 3 |
+| Gap candidates dropped as same-component at 200 m | 664 of 2 303 | 2 247 of 2 253 |
+| `buildGraph` at 200 m, median of 50 runs | 3.5 ms | 5.1 ms |
+
+Only two nodes are new: almost every junction vertex was already a node because some lane ended
+there — the lane running *through* it was simply not cut. Cutting those lanes is what turns
+52 lane components into 5. The gap pass, which used to supply the missing connectivity with
+441 straight lines, now finds that 2 247 of its 2 253 candidates join nodes lanes already
+connect, and keeps 6.
 
 ### 3.3 Gap edges
 
@@ -195,8 +230,9 @@ unpruned rule gives:
 | Gap edges joining already-connected nodes | 664 (28.8 %) |
 
 Because the rule wires together every pair of endpoints within the tolerance, and because nodes
-exist only at lane endpoints (§3.1), each junction where several lanes terminate becomes a small
-clique of gap edges. The result is less "lane network plus a few bridges" than "a dense
+existed only at lane endpoints when this was measured (lanes are split at junctions since
+[`09`](../backlog/done/09-mid-lane-junctions.md), §3.1), each junction where several lanes
+terminate becomes a small clique of gap edges. The result is less "lane network plus a few bridges" than "a dense
 straight-line mesh with lanes embedded in it".
 
 Almost none of it affects reachability. The same fixture reaches **5 connected components**
@@ -277,9 +313,9 @@ denser network before treating these ratios as general.
 [`09-mid-lane-junctions`](../backlog/09-mid-lane-junctions.md). After pruning they are 5 % of the
 gap edges rather than a headline problem.
 
-Pruning is a prerequisite for [`28-barrier-veto`](../backlog/28-barrier-veto.md) — 441
+Pruning is a prerequisite for [`28-barrier-veto`](../backlog/done/28-barrier-veto.md) — 441
 intersection tests per build instead of 2 303 — and for
-[`01-gap-penalty-and-tolerance`](../backlog/01-gap-penalty-and-tolerance.md), which prices what
+[`01-gap-penalty-and-tolerance`](../backlog/done/01-gap-penalty-and-tolerance.md), which prices what
 survives.
 
 ### 3.3.4 The barrier veto
@@ -446,7 +482,7 @@ A rider choosing from 58 loops at 86.5 % coverage is better served than one choo
 Refusing flagged gaps outright — rather than leaving them as a last resort — was measured too:
 loops fall from 58.2 to 31.3 at 200 m, coverage rises to 89.7 %, and barrier crossings go to zero.
 It is a good trade on these numbers, and it waits on the on-the-ground check that
-[`28`](../backlog/28-barrier-veto.md) left open.
+[`28`](../backlog/done/28-barrier-veto.md) left open.
 
 ### 3.4 The bounding-box prefilter
 
@@ -477,10 +513,11 @@ Siberia). Worth knowing; not worth fixing before someone routes a bike in Troms�
 
 ### 3.5 Complexity
 
-Let `L` = lane count, `P` = total polyline vertices, `N = |V| ≤ 2L`.
+Let `L` = lane count, `P` = total polyline vertices, `N = |V| ≤ P`.
 
 | Phase | Cost |
 |---|---|
+| Junction detection (`coordKey` per vertex, one count per key) | `O(P)` |
 | Lane ingestion + `turf.length` | `O(P)` |
 | Candidate detection | `O(N²)` prefilter tests, `O(p·N²)` distance calls where `p` is the pass rate |
 | Lane components (union-find) | `O(N α(N))` |
@@ -750,16 +787,16 @@ An honest list of the modelling assumptions, in rough order of how much they dis
 
 | # | Assumption | Consequence | Task |
 |---|---|---|---|
-| 1 | Junctions exist only at lane **endpoints** | A lane ending at the midpoint of another is not connected to it. The network is far more fragmented than the map looks, and the gap-bridging pass hides this by inventing edges through buildings and rivers. | [09](../backlog/09-mid-lane-junctions.md) |
-| 2 | Gap edges are still invented between endpoints, now at most k per node | Pruning cut them from 2 303 to 441 on the fixture (§3.3.2), but 441 straight lines through unverified terrain remain. | [28](../backlog/28-barrier-veto.md), [09](../backlog/09-mid-lane-junctions.md) |
-| 3 | Gap edges are **straight lines**, now tested against barriers | A gap that crosses a major road, railway or waterway away from a crossing is flagged and made expensive (§3.3.4), and lanes on different levels are never bridged. What survives is still a straight line: its distance is the crow-flies distance, not the ride. | [01](../backlog/01-gap-penalty-and-tolerance.md) |
+| 1 | Junctions exist only where lanes **share a vertex** | Lanes that meet at a shared OSM node are joined there (§3.1). Two lanes that cross without a shared node — including a cycleway passing under a road — are still not connected, and telling those apart needs the `layer` / `bridge` / `tunnel` tags. | follow-up of [09](../backlog/done/09-mid-lane-junctions.md) |
+| 2 | Gap edges are still invented between nodes, at most k per node | With lanes split at junctions the fixture needs 6 gap edges at 200 m instead of 441 (§3.2); those 6 are straight lines through unverified terrain. | [28](../backlog/done/28-barrier-veto.md) |
+| 3 | Gap edges are **straight lines**, now tested against barriers | A gap that crosses a major road, railway or waterway away from a crossing is flagged and made expensive (§3.3.4), and lanes on different levels are never bridged. What survives is still a straight line: its distance is the crow-flies distance, not the ride. | [01](../backlog/done/01-gap-penalty-and-tolerance.md) |
 | 4 | A gap costs 5–10× its length, the same premium on every kind of road | The premise is now in the cost function (§3.3.5), but one number covers a quiet residential street and a four-lane arterial alike. Level of Traffic Stress is the established model, and its own task. | — |
-| 5 | The graph is undirected | `oneway=yes`, contraflow lanes and one-way cycle tracks are ignored. | [09](../backlog/09-mid-lane-junctions.md) |
+| 5 | The graph is undirected | `oneway=yes`, contraflow lanes and one-way cycle tracks are ignored. | — |
 | 6 | No heuristic guides the search | Round-trip closure and explore direction are pure chance; 80 attempts stand in for a distance-aware objective. | [02](../backlog/02-astar-routing.md) |
 | 7 | `laneType` and `surface` are parsed but unused | A `shared_lane` on a four-lane road weighs exactly the same as a segregated `cycleway`; cobbles weigh the same as asphalt. | [05](../backlog/05-route-preferences-ui.md) |
 | 8 | No elevation model | Distance is the only cost. A 12 % climb is free. | — |
-| 9 | Routes start and end at graph nodes | The start point snaps to a lane endpoint, potentially hundreds of meters away; you cannot begin mid-lane. | [09](../backlog/09-mid-lane-junctions.md) |
-| 10 | Every lane is a single edge | A 3 km lane cannot be entered or left partway, and cannot be partially traversed. | [09](../backlog/09-mid-lane-junctions.md) |
+| 9 | Routes start and end at graph nodes | The start point snaps to a lane endpoint or junction, potentially hundreds of meters away; you cannot begin mid-lane. Splitting long lanes at a fixed interval would make this finer. | [29](../backlog/29-start-point-selection.md) |
+| 10 | A lane between two junctions is a single edge | A long lane with no junction on it cannot be entered or left partway. | — |
 
 ---
 
@@ -785,8 +822,8 @@ Three layers, deliberately separated:
 - **`geo-to-graph`** — does geometry become the right graph? A `.geojson` file annotated with
   `_nodeStart`/`_nodeEnd` names is converted, then compared against an `.expected.dot` listing
   the nodes and edges (with `type=gap` marking synthetic edges). Covers endpoint merging, gap
-  bridging, three-way junctions, closed triangles and clustered endpoints that must **not** be
-  bridged.
+  bridging, three-way junctions, a T-junction at an interior vertex, closed triangles and
+  clustered endpoints that must **not** be bridged.
 - **`graph-to-path`** — given a graph, does the router find the right paths? A `.dot` file carries
   both the graph and its assertions as graph attributes (`start`, `end`, `minDist`, `maxDist`,
   `roundTrip`, `expect_route`, `expect_any_route`, `expect_isRoundTrip`, `expect_minRoutes`,

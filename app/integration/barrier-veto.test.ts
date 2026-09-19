@@ -2,9 +2,13 @@
  * The barrier veto against the real Warsaw Bemowo export and the barrier
  * layer fetched for the same bounding box.
  *
- * The numbers in the assertions are the ones recorded in
- * backlog/28-barrier-veto.md; they are ranges rather than exact values so an
- * OSM refresh does not break the suite, but a large move should be looked at.
+ * The numbers in the assertions were recorded in backlog/done/28-barrier-veto.md
+ * and re-measured after lanes were split at shared vertices (task 09); they are
+ * ranges rather than exact values so an OSM refresh does not break the suite,
+ * but a large move should be looked at.
+ *
+ * The ratio tests run at 500 m: at the default 200 m the split lane graph
+ * leaves only 6 gap edges, too few for a ratio to mean anything.
  */
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'fs'
@@ -43,23 +47,26 @@ describe('barrier veto — Warsaw overpass data', () => {
     expect(barriers.crossings.length).toBeGreaterThan(500)
   })
 
-  it('flags a minority of gap edges at the default tolerance', () => {
-    const stats = getGapStats(buildGraph(lanes, 200, { barriers }))
+  it('flags a minority of gap edges', () => {
+    const stats = getGapStats(buildGraph(lanes, 500, { barriers }))
 
-    // Recorded: 41 of 441 gap edges, 9.3 %.
+    // Recorded: 11 of 93 gap edges, 11.8 % (41 of 441 before task 09).
     expect(stats.barriersChecked).toBe(true)
     expect(stats.barrierCrossings).toBeGreaterThan(0)
     expect(stats.barrierCrossings).toBeLessThan(stats.kept * 0.2)
   })
 
-  it('excuses most crossings of a barrier where a crossing exists', () => {
-    const withCrossings = getGapStats(buildGraph(lanes, 200, { barriers })).barrierCrossings
+  it('excuses crossings of a barrier where a crossing exists', () => {
+    const withCrossings = getGapStats(buildGraph(lanes, 500, { barriers })).barrierCrossings
     const withoutCrossings = getGapStats(
-      buildGraph(lanes, 200, { barriers: { barriers: barriers.barriers, crossings: [] } }),
+      buildGraph(lanes, 500, { barriers: { barriers: barriers.barriers, crossings: [] } }),
     ).barrierCrossings
 
-    // Recorded: 41 flagged with crossings, 109 without — crossings excuse 62 %.
-    expect(withCrossings).toBeLessThan(withoutCrossings * 0.6)
+    // Recorded: 11 flagged with crossings, 14 without. Before task 09 it was
+    // 41 against 109 at 200 m; most gaps that a crossing excused are now lane
+    // edges, since the lane ending at the crossing shares a vertex with the
+    // one continuing past it.
+    expect(withCrossings).toBeLessThan(withoutCrossings)
   })
 
   it('marks gaps without disconnecting the graph', () => {

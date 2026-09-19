@@ -1,7 +1,7 @@
 import Graph from 'graphology'
 import * as turf from '@turf/turf'
-import type { LineString } from 'geojson'
-import type { BikeLane } from '../entities/bike-lane'
+import type { LineString, Position } from 'geojson'
+import type { BikeLane, LaneType } from '../entities/bike-lane'
 import type { BarrierData, BarrierKind } from '../entities/barrier'
 import { approxMeters, coordKey } from './algorithms'
 import { buildBarrierIndex, findBlockingBarrier } from './barriers'
@@ -20,6 +20,10 @@ export interface EdgeAttrs {
   geometry: LineString
   /** Set when this gap crosses a barrier away from any crossing. */
   barrier?: BarrierKind
+  /** Lane edges carry the lane they were cut from; gap edges have none. */
+  laneType?: LaneType
+  surface?: string
+  tags?: Record<string, string>
 }
 
 /** Counts from the gap pass, so pruning stays measurable and can be shown in a debug view. */
@@ -136,40 +140,117 @@ function joinComponents(parent: number[], rank: number[], a: number, b: number):
   return true
 }
 
+/** The snapped key of every vertex of a lane, in order. */
+function laneVertexKeys(lane: BikeLane): string[] {
+  return lane.geometry.coordinates.map(([lon, lat]) => coordKey(lon, lat))
+}
+
 /**
- * Adds one edge per lane and returns the levels each node sits on. A node can
- * carry several levels when lanes at different heights end at the same spot.
+ * Counts, per snapped coordinate, how many distinct lanes have a vertex there.
+ * A count of two or more marks a junction, wherever along the lanes it sits.
+ */
+function countLanesPerVertex(laneKeys: string[][]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const keys of laneKeys) {
+    const seenInLane = new Set<string>()
+    for (const key of keys) {
+      if (seenInLane.has(key)) continue
+      seenInLane.add(key)
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+  }
+  return counts
+}
+
+/**
+ * Cuts a lane at every interior vertex shared with another lane. Returns the
+ * pieces in order; a lane touching no other lane inside comes back whole.
+ *
+ * Consecutive vertices inside one snapping cell are one junction: the cut is
+ * made at the first of them, so the sub-metre geometry between them stays in
+ * the next piece instead of becoming a zero-length piece that is dropped.
+ */
+function splitAtJunctions(
+  coords: Position[],
+  keys: string[],
+  laneCounts: Map<string, number>,
+): Position[][] {
+  const pieces: Position[][] = []
+  const last = coords.length - 1
+  let from = 0
+  for (let i = 1; i < last; i++) {
+    if ((laneCounts.get(keys[i]) ?? 0) < 2 || keys[i] === keys[i - 1]) continue
+    if (runReachesEnd(keys, i)) break
+    pieces.push(coords.slice(from, i + 1))
+    from = i
+  }
+  if (from === 0) return [coords]
+  pieces.push(coords.slice(from))
+  return pieces
+}
+
+/** True when every vertex from i to the last one shares the key of vertex i. */
+function runReachesEnd(keys: string[], i: number): boolean {
+  for (let j = i + 1; j < keys.length; j++) {
+    if (keys[j] !== keys[i]) return false
+  }
+  return true
+}
+
+/**
+ * Adds lane edges and returns the levels each node sits on. A lane becomes one
+ * edge per piece between junctions (splitAtJunctions), so lanes that meet away
+ * from their endpoints are connected. A node can carry several levels when
+ * lanes at different heights pass through the same spot.
  */
 function addLaneEdges(graph: BikeLaneGraph, lanes: BikeLane[]): Map<string, Set<number>> {
   const levels = new Map<string, Set<number>>()
+  const laneKeys = lanes.map(laneVertexKeys)
+  const laneCounts = countLanesPerVertex(laneKeys)
 
-  for (const lane of lanes) {
-    const coords = lane.geometry.coordinates
-    const startKey = coordKey(coords[0][0], coords[0][1])
-    const endKey = coordKey(coords[coords.length - 1][0], coords[coords.length - 1][1])
-
-    graph.mergeNode(startKey, { lon: coords[0][0], lat: coords[0][1] })
-    graph.mergeNode(endKey, {
-      lon: coords[coords.length - 1][0],
-      lat: coords[coords.length - 1][1],
-    })
-
+  lanes.forEach((lane, i) => {
     const level = osmLevel(lane.tags)
-    recordLevel(levels, startKey, level)
-    recordLevel(levels, endKey, level)
-
-    if (startKey !== endKey && !graph.hasEdge(startKey, endKey)) {
-      const dist = turf.length(turf.feature(lane.geometry), { units: 'meters' })
-      graph.addEdge(startKey, endKey, {
-        distanceMeters: dist,
-        costMeters: dist,
-        isGap: false,
-        geometry: lane.geometry,
-      })
+    for (const coords of splitAtJunctions(lane.geometry.coordinates, laneKeys[i], laneCounts)) {
+      addLanePiece(graph, levels, lane, coords, level)
     }
-  }
+  })
 
   return levels
+}
+
+function addLanePiece(
+  graph: BikeLaneGraph,
+  levels: Map<string, Set<number>>,
+  lane: BikeLane,
+  coords: Position[],
+  level: number,
+): void {
+  const start = coords[0]
+  const end = coords[coords.length - 1]
+  const startKey = coordKey(start[0], start[1])
+  const endKey = coordKey(end[0], end[1])
+
+  graph.mergeNode(startKey, { lon: start[0], lat: start[1] })
+  graph.mergeNode(endKey, { lon: end[0], lat: end[1] })
+  recordLevel(levels, startKey, level)
+  recordLevel(levels, endKey, level)
+
+  if (startKey === endKey || graph.hasEdge(startKey, endKey)) return
+
+  const geometry: LineString =
+    coords === lane.geometry.coordinates
+      ? lane.geometry
+      : { type: 'LineString', coordinates: coords }
+  const dist = turf.length(turf.feature(geometry), { units: 'meters' })
+  graph.addEdge(startKey, endKey, {
+    distanceMeters: dist,
+    costMeters: dist,
+    isGap: false,
+    geometry,
+    laneType: lane.laneType,
+    ...(lane.surface !== undefined ? { surface: lane.surface } : {}),
+    tags: lane.tags,
+  })
 }
 
 function recordLevel(levels: Map<string, Set<number>>, key: string, level: number): void {
@@ -367,7 +448,9 @@ export interface GraphOptions {
 }
 
 /**
- * Builds an undirected graphology graph from bike lane endpoints.
+ * Builds an undirected graphology graph from bike lanes. Nodes sit at lane
+ * endpoints and at every vertex two lanes share, so lanes are split where
+ * they meet (addLaneEdges).
  *
  * Adds synthetic gap edges between endpoint pairs within maxGapMeters, minus
  * the ones that are not worth having: pairs on different levels are dropped

@@ -104,6 +104,140 @@ describe('buildGraph', () => {
   })
 })
 
+// ── buildGraph lane splitting ─────────────────────────────────────────────────
+
+describe('buildGraph lane splitting', () => {
+  it('splits a lane where another lane touches an interior vertex', () => {
+    const through = makeLane('through', [
+      [0, 0],
+      [0.001, 0],
+      [0.002, 0],
+    ])
+    const stub = makeLane('stub', [
+      [0.001, 0],
+      [0.001, 0.001],
+    ])
+    const g = buildGraph([through, stub], 0)
+    const junction = coordKey(0.001, 0)
+    expect(g.order).toBe(4)
+    expect(g.size).toBe(3)
+    expect(g.degree(junction)).toBe(3)
+  })
+
+  it('gives each piece the length of its own geometry', () => {
+    const through = makeLane('through', [
+      [0, 0],
+      [0.001, 0],
+      [0.003, 0],
+    ])
+    const stub = makeLane('stub', [
+      [0.001, 0],
+      [0.001, 0.001],
+    ])
+    const g = buildGraph([through, stub], 0)
+    const whole = buildGraph([through], 0)
+    const wholeLength = whole.getEdgeAttribute(whole.edges()[0], 'distanceMeters')
+    const west = g.getEdgeAttributes(g.edge(coordKey(0, 0), coordKey(0.001, 0))!)
+    const east = g.getEdgeAttributes(g.edge(coordKey(0.001, 0), coordKey(0.003, 0))!)
+    expect(west.geometry.coordinates).toEqual([
+      [0, 0],
+      [0.001, 0],
+    ])
+    expect(east.geometry.coordinates).toEqual([
+      [0.001, 0],
+      [0.003, 0],
+    ])
+    expect(east.distanceMeters).toBeCloseTo(west.distanceMeters * 2, 6)
+    expect(west.distanceMeters + east.distanceMeters).toBeCloseTo(wholeLength, 6)
+  })
+
+  it('carries the lane type, surface and tags onto every piece', () => {
+    const through: BikeLane = {
+      ...makeLane(
+        'through',
+        [
+          [0, 0],
+          [0.001, 0],
+          [0.002, 0],
+        ],
+        { highway: 'cycleway', surface: 'asphalt' },
+      ),
+      laneType: 'track',
+      surface: 'asphalt',
+    }
+    const stub = makeLane('stub', [
+      [0.001, 0],
+      [0.001, 0.001],
+    ])
+    const g = buildGraph([through, stub], 0)
+    const junction = coordKey(0.001, 0)
+    for (const far of [coordKey(0, 0), coordKey(0.002, 0)]) {
+      const attrs = g.getEdgeAttributes(g.edge(junction, far)!)
+      expect(attrs.laneType).toBe('track')
+      expect(attrs.surface).toBe('asphalt')
+      expect(attrs.tags).toBe(through.tags)
+    }
+    const stubAttrs = g.getEdgeAttributes(g.edge(junction, coordKey(0.001, 0.001))!)
+    expect(stubAttrs.laneType).toBe('cycleway')
+    expect(stubAttrs.surface).toBeUndefined()
+  })
+
+  it('keeps a lane whole when nothing touches it inside', () => {
+    const lane = makeLane('a', [
+      [0, 0],
+      [0.001, 0],
+      [0.002, 0],
+    ])
+    const other = makeLane('b', [
+      [0.002, 0],
+      [0.003, 0],
+    ])
+    const g = buildGraph([lane, other], 0)
+    expect(g.size).toBe(2)
+    expect(g.getEdgeAttribute(g.edge(coordKey(0, 0), coordKey(0.002, 0))!, 'geometry')).toBe(
+      lane.geometry,
+    )
+  })
+
+  it('cuts once at consecutive vertices inside one snapping cell and loses no length', () => {
+    const through = makeLane('through', [
+      [0, 0],
+      [0.001, 0],
+      [0.001000004, 0],
+      [0.002, 0],
+    ])
+    const stub = makeLane('stub', [
+      [0.001, 0],
+      [0.001, 0.001],
+    ])
+    const g = buildGraph([through, stub], 0)
+    const whole = buildGraph([through], 0)
+    const wholeLength = whole.getEdgeAttribute(whole.edges()[0], 'distanceMeters')
+    let laneLength = 0
+    g.forEachEdge((_key, attrs) => {
+      if (attrs.geometry.coordinates[0][1] === 0 && attrs.geometry.coordinates[1][1] === 0)
+        laneLength += attrs.distanceMeters
+    })
+    expect(g.order).toBe(4)
+    expect(g.size).toBe(3)
+    expect(laneLength).toBeCloseTo(wholeLength, 6)
+  })
+
+  it('does not cut where the shared vertex is the first or last of a lane', () => {
+    const a = makeLane('a', [
+      [0, 0],
+      [0.001, 0],
+    ])
+    const b = makeLane('b', [
+      [0.001, 0],
+      [0.002, 0],
+    ])
+    const g = buildGraph([a, b], 0)
+    expect(g.order).toBe(3)
+    expect(g.size).toBe(2)
+  })
+})
+
 // ── gap pruning ──────────────────────────────────────────────
 
 describe('buildGraph gap pruning', () => {
