@@ -4,14 +4,7 @@ import { saveArea, loadArea } from '~/infrastructure/cache/area-cache'
 import { geojsonToBikeLanes } from '~/domain/mappers/osm-to-domain'
 import { geojsonToBarriers } from '~/domain/mappers/osm-to-barriers'
 import type { BoundingBox, CachedArea } from '~/domain/entities/area'
-import type { BikeLane } from '~/domain/entities/bike-lane'
 import type { BarrierData } from '~/domain/entities/barrier'
-
-export interface AreaData {
-  bikeLanes: BikeLane[]
-  /** null when the barrier fetch failed, so gaps here cannot be checked. */
-  barriers: BarrierData | null
-}
 
 function bboxId(bbox: BoundingBox): string {
   return `${bbox.west.toFixed(3)},${bbox.south.toFixed(3)},${bbox.east.toFixed(3)},${bbox.north.toFixed(3)}`
@@ -24,13 +17,16 @@ function bboxId(bbox: BoundingBox): string {
  * The barrier query is allowed to fail on its own: lanes are the product, and
  * a route without barrier data is still a route — it is reported as unchecked
  * rather than withheld.
+ *
+ * Returns the whole `CachedArea`, id and box included, so the caller can hold
+ * it alongside the other loaded areas and know which part of the map it covers.
  */
-export async function fetchArea(bbox: BoundingBox, forceRefresh = false): Promise<AreaData> {
+export async function fetchArea(bbox: BoundingBox, forceRefresh = false): Promise<CachedArea> {
   const id = bboxId(bbox)
 
   if (!forceRefresh) {
     const cached = await loadArea(id)
-    if (cached) return { bikeLanes: cached.bikeLanes, barriers: cached.barriers ?? null }
+    if (cached) return { ...cached, barriers: cached.barriers ?? null }
   }
 
   const geojson = await fetchOverpassGeoJSON(buildBikeLaneQuery(bbox))
@@ -40,7 +36,7 @@ export async function fetchArea(bbox: BoundingBox, forceRefresh = false): Promis
   const area: CachedArea = { id, bbox, bikeLanes, barriers, fetchedAt: new Date() }
   await saveArea(area)
 
-  return { bikeLanes, barriers }
+  return area
 }
 
 async function fetchBarriers(bbox: BoundingBox): Promise<BarrierData | null> {

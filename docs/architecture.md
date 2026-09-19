@@ -134,12 +134,35 @@ on app start.
 6. The area — lanes and barriers together — is written to IndexedDB keyed by a bbox id rounded to
    3 decimals. A browser that refuses the database, or a write that fails, is logged and
    ignored — see §4.1.
-7. `setBikeLanes` updates the store, the overlay redraws, and `clearRouteCache()` discards stale
-   route batches.
+7. `mergeAreas` adds the area to the ones already held, the overlay redraws, and
+   `clearRouteCache()` discards stale route batches.
 
-On mount, a separate effect calls `loadAllAreas()`, drops entries older than 7 days, and flattens
-**every** surviving area into the store — so a returning user sees previously fetched cities with
-no network call.
+### 3.1.1 What is held, and what is drawn
+
+The store holds **areas**, not a flat list of lanes: `bikeLanes` and `barriers` are derived from
+`areas` once per change. Two boxes decide which areas that is and how much of them reaches the
+map, both recomputed when the map settles (`onMoveEnd`) rather than on every frame:
+
+| Bound | Where | Margin | What it decides |
+|---|---|---|---|
+| Load | `useBikeLanes` | 1 view in each direction | Which cached areas are read out of IndexedDB and held in memory — and therefore what the router is given |
+| Render | `BikeLaneLayer` | ¼ view in each direction | Which of the held lanes are handed to MapLibre as a GeoJSON source |
+
+Areas outside the load bound are dropped from memory but stay in IndexedDB, and come back when the
+rider moves there. On the Warsaw city extract (10 777 lanes, 3.31 MB of GeoJSON) the render bound
+hands MapLibre 225 lanes at zoom 15 and 1 934 at zoom 13; at zoom 11 the whole city is on screen
+and it hands over all of it, which is the right answer.
+
+**The router is given exactly the held set** — every lane in every loaded area, nothing more and
+nothing less. A route can therefore stop at the edge of what has been fetched, which is a property
+of the data rather than of the search.
+
+### 3.1.2 The mount path
+
+Rather than reading everything, the effect lists the cached areas **by key** (`listAreaBounds`,
+which parses the box out of the id and deserialises nothing), keeps those intersecting the load
+bound, drops entries older than 7 days, and merges the rest — so a returning user sees the lanes
+around them with no network call, and the cities they are not looking at cost nothing.
 
 ### 3.2 Suggesting a route
 
@@ -153,7 +176,7 @@ Triggered by **Suggest Route**.
 4. On a miss, `findRoutes` builds the graph, runs the selected strategy from every lane endpoint
    within `startProximityMeters` of the start, and deduplicates by route signature.
 5. If fewer than 3 routes emerged, the graph is rebuilt at a 1 000 m gap tolerance and the
-   strategy re-run — see [`01`](../backlog/01-gap-penalty-and-tolerance.md).
+   strategy re-run — see [`01`](../backlog/done/01-gap-penalty-and-tolerance.md).
 6. The batch is shuffled once and cached; the first route is returned and drawn.
 
 **New Route** re-enters the same path and the cache serves the next route from the batch, so
@@ -177,8 +200,9 @@ their state to `localStorage`.
 |---|---|---|---|
 | `viewport` | localStorage (`cycle-map-viewport`) | yes | Restores the last map position |
 | `bbox`, `isLoading`, `fetchError`, `lastFetchedAt` | memory | no | Excluded from `partialize` |
-| `bikeLanes` | IndexedDB (`cycle-app` → `areas`) | yes, on mount | Areas older than 7 days are filtered out but never deleted |
-| `barriers` | IndexedDB, with the area | yes, on mount | Null unless **every** restored area has them, so a partly unchecked set is never reported as checked |
+| `areas` | IndexedDB (`cycle-app` → `areas`) | yes, those near the view | Areas older than 7 days are filtered out but never deleted |
+| `bikeLanes` | derived from `areas` | — | Recomputed once per area change, not per read |
+| `barriers` | derived from `areas` | — | Null unless **every** held area has them, so a partly unchecked set is never reported as checked |
 | `currentRoute` | localStorage (`cycle-routing`) | yes, but degraded | `createdAt` rehydrates as a `string`, not a `Date` — [`15`](../backlog/15-persisted-route-rehydration.md) |
 | `preferences` | localStorage (`cycle-routing`) | yes | Gap tolerance, routing mode and destination are editable |
 | route batches | module-level `Map` in `build-route.ts` | no | Cleared when new lane data arrives |
@@ -299,7 +323,7 @@ Each is a task in [`/backlog`](../backlog/README.md).
 
 | Gap | Impact | Task |
 |---|---|---|
-| Gap edges are unweighted; tolerance is silently widened | The core bike-lane-first guarantee is not enforced | [01](../backlog/01-gap-penalty-and-tolerance.md) |
+| Gap edges are unweighted; tolerance is silently widened | The core bike-lane-first guarantee is not enforced | [01](../backlog/done/01-gap-penalty-and-tolerance.md) |
 | Graph nodes exist only at lane **endpoints** | Lanes meeting mid-way are never connected; the network is more fragmented than reality | [09](../backlog/09-mid-lane-junctions.md) |
 | Gap detection is O(n²) over all nodes | City-scale fetches block the main thread for seconds | [16](../backlog/16-spatial-index.md), [17](../backlog/17-web-worker.md) |
 | Distance preferences have no UI | Distance configuration is unreachable | [05](../backlog/05-route-preferences-ui.md) |

@@ -82,6 +82,14 @@ export function CycleMap() {
   function handleMove(e: ViewStateChangeEvent) {
     const { longitude, latitude, zoom } = e.viewState
     setViewport({ longitude, latitude, zoom })
+  }
+
+  /**
+   * The box is what decides which lanes are drawn and which cached areas are
+   * held, so it is updated when the map settles rather than on every frame of a
+   * pan — otherwise both are recomputed sixty times a second.
+   */
+  function handleMoveEnd(e: ViewStateChangeEvent) {
     const b = e.target.getBounds()
     setBbox({ west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() })
   }
@@ -96,6 +104,7 @@ export function CycleMap() {
       mapStyle={MAP_STYLE}
       workerUrl={maplibreWorkerUrl}
       onMove={handleMove}
+      onMoveEnd={handleMoveEnd}
       onClick={event => {
         if (isChoosingDestination) setDestination(event.lngLat.lng, event.lngLat.lat)
       }}

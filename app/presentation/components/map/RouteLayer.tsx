@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Source, Layer } from 'react-map-gl/maplibre'
 import { routeToFeatureCollection } from '~/domain/mappers/geojson-from-domain'
 import { useRoutingStore } from '~/application/stores/routing-store'
@@ -9,10 +10,13 @@ const CONNECTOR_FILTER: any = ['==', ['get', 'kind'], 'connector']
 
 export function RouteLayer() {
   const route = useRoutingStore(s => s.currentRoute)
-  if (!route) return null
+  // Rebuilt only when the route changes, not on every render of the map.
+  const data = useMemo(() => (route ? routeToFeatureCollection(route) : null), [route])
+
+  if (!data) return null
 
   return (
-    <Source id="route" type="geojson" data={routeToFeatureCollection(route)}>
+    <Source id="route" type="geojson" data={data}>
       {/* Lane segments — white casing + orange fill */}
       <Layer
         id="route-lane-casing"

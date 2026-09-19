@@ -1,5 +1,6 @@
 import { tryGetDb } from './db'
-import type { CachedArea } from '~/domain/entities/area'
+import { bboxFromAreaId } from '~/domain/entities/area'
+import type { BoundingBox, CachedArea } from '~/domain/entities/area'
 
 const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
@@ -33,6 +34,28 @@ export async function loadArea(id: string): Promise<CachedArea | undefined> {
   } catch (err) {
     console.warn(`Could not read cached area ${id}.`, err)
     return undefined
+  }
+}
+
+/**
+ * The id and box of every cached area, read from the keys alone. Nothing is
+ * deserialised, so this stays cheap however much lane data is stored — which is
+ * what lets the app decide which areas are worth loading before loading any.
+ */
+export async function listAreaBounds(): Promise<Array<{ id: string; bbox: BoundingBox }>> {
+  const db = await tryGetDb()
+  if (!db) return []
+
+  try {
+    const bounds: Array<{ id: string; bbox: BoundingBox }> = []
+    for (const id of await db.getAllKeys('areas')) {
+      const bbox = bboxFromAreaId(id)
+      if (bbox) bounds.push({ id, bbox })
+    }
+    return bounds
+  } catch (err) {
+    console.warn('Could not list the cached areas.', err)
+    return []
   }
 }
 
