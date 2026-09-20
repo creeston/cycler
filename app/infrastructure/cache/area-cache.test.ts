@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { loadAllAreas, loadArea, pruneStaleAreas, saveArea } from './area-cache'
+import {
+  clearCachedAreas,
+  getAreaCacheStats,
+  loadAllAreas,
+  loadArea,
+  pruneStaleAreas,
+  saveArea,
+} from './area-cache'
 import { tryGetDb } from './db'
 import type { CachedArea } from '~/domain/entities/area'
 
@@ -24,6 +31,11 @@ describe('area cache without a database', () => {
   it('prunes nothing', async () => {
     await expect(pruneStaleAreas()).resolves.toBeUndefined()
   })
+
+  it('reports and clears an empty cache', async () => {
+    await expect(getAreaCacheStats()).resolves.toEqual({ count: 0, newestFetchedAt: null })
+    await expect(clearCachedAreas()).resolves.toBeUndefined()
+  })
 })
 
 describe('area cache when the database rejects', () => {
@@ -36,6 +48,8 @@ describe('area cache when the database rejects', () => {
       get: denied,
       getAll: denied,
       delete: denied,
+      count: denied,
+      clear: denied,
     } as unknown as Awaited<ReturnType<typeof tryGetDb>>)
     vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
@@ -55,6 +69,11 @@ describe('area cache when the database rejects', () => {
 
   it('prunes nothing instead of throwing', async () => {
     await expect(pruneStaleAreas()).resolves.toBeUndefined()
+  })
+
+  it('reports and clears an empty cache instead of throwing', async () => {
+    await expect(getAreaCacheStats()).resolves.toEqual({ count: 0, newestFetchedAt: null })
+    await expect(clearCachedAreas()).resolves.toBeUndefined()
   })
 })
 

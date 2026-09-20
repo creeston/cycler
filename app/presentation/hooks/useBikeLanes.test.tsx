@@ -1,21 +1,31 @@
 import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useMapStore } from '~/application/stores/map-store'
-import { listAreaBounds, loadArea } from '~/infrastructure/cache/area-cache'
+import {
+  getAreaCacheStats,
+  listAreaBounds,
+  loadArea,
+  pruneStaleAreas,
+} from '~/infrastructure/cache/area-cache'
 import { fetchArea } from '~/application/use-cases/fetch-area'
 import type { BoundingBox, CachedArea } from '~/domain/entities/area'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 import { useBikeLanes } from './useBikeLanes'
 
 vi.mock('~/infrastructure/cache/area-cache', () => ({
+  getAreaCacheStats: vi.fn(),
   listAreaBounds: vi.fn(),
   loadArea: vi.fn(),
+  pruneStaleAreas: vi.fn(),
 }))
+vi.mock('~/application/use-cases/clear-cached-data', () => ({ clearCachedData: vi.fn() }))
 vi.mock('~/application/use-cases/fetch-area', () => ({ fetchArea: vi.fn() }))
 
 const mockedList = vi.mocked(listAreaBounds)
 const mockedLoad = vi.mocked(loadArea)
 const mockedFetch = vi.mocked(fetchArea)
+const mockedStats = vi.mocked(getAreaCacheStats)
+const mockedPrune = vi.mocked(pruneStaleAreas)
 
 const WARSAW: BoundingBox = { west: 20.9, south: 52.2, east: 21.1, north: 52.3 }
 const BERLIN: BoundingBox = { west: 13.3, south: 52.4, east: 13.5, north: 52.6 }
@@ -27,6 +37,7 @@ function Probe() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockedStats.mockResolvedValue({ count: 0, newestFetchedAt: null })
   useMapStore.setState({
     areas: [],
     bikeLanes: [],
@@ -39,6 +50,20 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('useBikeLanes area loading', () => {
+  it('prunes expired areas before restoring the cache', async () => {
+    mockedList.mockResolvedValue([])
+    useMapStore.setState({ bbox: WARSAW })
+
+    await act(async () => {
+      render(<Probe />)
+    })
+
+    expect(mockedPrune).toHaveBeenCalledOnce()
+    expect(mockedPrune.mock.invocationCallOrder[0]).toBeLessThan(
+      mockedList.mock.invocationCallOrder[0],
+    )
+  })
+
   it('restores only the cached areas near the map', async () => {
     mockedList.mockResolvedValue([
       { id: 'warsaw', bbox: WARSAW },

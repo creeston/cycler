@@ -4,6 +4,11 @@ import type { BoundingBox, CachedArea } from '~/domain/entities/area'
 
 const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+export interface AreaCacheStats {
+  count: number
+  newestFetchedAt: Date | null
+}
+
 /**
  * Every function here degrades to "no cache" instead of throwing. The database
  * can be missing (see tryGetDb) and a write can still fail afterwards — a full
@@ -68,6 +73,37 @@ export async function loadAllAreas(): Promise<CachedArea[]> {
   } catch (err) {
     console.warn('Could not read the cached areas.', err)
     return []
+  }
+}
+
+/** Returns cache metadata without deserialising every area's lane data. */
+export async function getAreaCacheStats(): Promise<AreaCacheStats> {
+  const db = await tryGetDb()
+  if (!db) return { count: 0, newestFetchedAt: null }
+
+  try {
+    const count = await db.count('areas')
+    if (count === 0) return { count, newestFetchedAt: null }
+
+    const cursor = await db
+      .transaction('areas', 'readonly')
+      .store.index('by-fetched-at')
+      .openKeyCursor(null, 'prev')
+    return { count, newestFetchedAt: cursor ? new Date(cursor.key) : null }
+  } catch (err) {
+    console.warn('Could not inspect the cached areas.', err)
+    return { count: 0, newestFetchedAt: null }
+  }
+}
+
+export async function clearCachedAreas(): Promise<void> {
+  const db = await tryGetDb()
+  if (!db) return
+
+  try {
+    await db.clear('areas')
+  } catch (err) {
+    console.warn('Could not clear the cached areas.', err)
   }
 }
 

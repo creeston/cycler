@@ -57,7 +57,10 @@ function derive(areas: CachedArea[]): DerivedAreaState {
   return {
     areas,
     bikeLanes: areas.flatMap(a => a.bikeLanes),
-    barriers: areas.every(a => a.barriers) ? mergeBarrierData(areas.map(a => a.barriers!)) : null,
+    barriers:
+      areas.length > 0 && areas.every(a => a.barriers)
+        ? mergeBarrierData(areas.map(a => a.barriers!))
+        : null,
     lastFetchedAt: fetchTimes.length > 0 ? new Date(Math.max(...fetchTimes)) : null,
   }
 }

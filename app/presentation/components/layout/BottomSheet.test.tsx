@@ -5,17 +5,25 @@ import { DEFAULT_PREFERENCES } from '~/domain/entities/route'
 import type { Route, RoutePreferences } from '~/domain/entities/route'
 import { BottomSheet } from './BottomSheet'
 
+const clearStoredAreas = vi.fn()
+
 vi.mock('~/presentation/hooks/useBikeLanes', () => ({
   useBikeLanes: () => ({
     fetch: vi.fn(),
     isLoading: false,
     lastFetchedAt: null,
     isAreaTooLarge: false,
+    cacheReady: true,
+    storedAreaCount: 2,
+    newestStoredAt: new Date(),
+    isClearingCache: false,
+    clearStoredAreas,
   }),
 }))
 
 beforeEach(() => {
   vi.useFakeTimers()
+  vi.clearAllMocks()
   localStorage.clear()
   useRoutingStore.setState({
     currentRoute: null,
@@ -31,6 +39,27 @@ afterEach(() => {
 })
 
 describe('BottomSheet preferences', () => {
+  it('shows stored data in Settings and confirms before clearing it', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<BottomSheet />)
+    fireEvent.click(screen.getByText('Settings'))
+
+    expect(screen.getByText('2 areas stored')).toBeInTheDocument()
+    expect(screen.getByText('Newest stored less than an hour ago')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear stored map data' }))
+
+    expect(window.confirm).toHaveBeenCalledOnce()
+    expect(clearStoredAreas).toHaveBeenCalledOnce()
+  })
+
+  it('keeps stored data when clearing is cancelled', () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<BottomSheet />)
+    fireEvent.click(screen.getByRole('button', { name: 'Clear stored map data' }))
+
+    expect(clearStoredAreas).not.toHaveBeenCalled()
+  })
+
   it('debounces and persists gap tolerance changes', () => {
     render(<BottomSheet />)
     fireEvent.click(screen.getByText('Preferences'))

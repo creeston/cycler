@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, MapPin, Route, Download, RefreshCw, X } from 'lucide-react'
+import { ChevronDown, MapPin, Route, Download, RefreshCw, Trash2, X } from 'lucide-react'
 import { Button } from '~/presentation/components/ui/Button'
 import { SegmentedControl } from '~/presentation/components/ui/SegmentedControl'
 import { Slider } from '~/presentation/components/ui/Slider'
@@ -47,10 +47,31 @@ function crossingToneClass(route: CycleRoute): string {
     : 'font-medium text-amber-600'
 }
 
+function newestCacheLabel(newest: Date | null): string {
+  if (!newest) return 'No map areas stored'
+  const elapsedMs = Math.max(0, Date.now() - newest.getTime())
+  const elapsedHours = Math.floor(elapsedMs / (60 * 60 * 1000))
+  if (elapsedHours === 0) return 'Newest stored less than an hour ago'
+  if (elapsedHours < 24)
+    return `Newest stored ${elapsedHours} ${elapsedHours === 1 ? 'hour' : 'hours'} ago`
+  const elapsedDays = Math.floor(elapsedHours / 24)
+  return `Newest stored ${elapsedDays} ${elapsedDays === 1 ? 'day' : 'days'} ago`
+}
+
 export function BottomSheet() {
   const [expanded, setExpanded] = useState(true)
 
-  const { fetch: fetchLanes, isLoading, lastFetchedAt, isAreaTooLarge } = useBikeLanes()
+  const {
+    fetch: fetchLanes,
+    isLoading,
+    lastFetchedAt,
+    isAreaTooLarge,
+    cacheReady,
+    storedAreaCount,
+    newestStoredAt,
+    isClearingCache,
+    clearStoredAreas,
+  } = useBikeLanes()
   const {
     suggest,
     clear,
@@ -107,6 +128,13 @@ export function BottomSheet() {
     })
   }
 
+  async function confirmAndClearCache(): Promise<void> {
+    const confirmed = window.confirm(
+      'Delete all stored map areas? The map and current route will be cleared. This cannot be undone.',
+    )
+    if (confirmed) await clearStoredAreas()
+  }
+
   return (
     <div
       className="absolute bottom-0 left-0 right-0 z-10 transition-transform duration-300"
@@ -123,7 +151,7 @@ export function BottomSheet() {
       </div>
 
       {/* panel body */}
-      <div className="bg-white/95 backdrop-blur-sm px-4 pb-8 pt-2 shadow-lg space-y-3">
+      <div className="max-h-[calc(100vh-56px)] space-y-3 overflow-y-auto bg-white/95 px-4 pt-2 pb-8 shadow-lg backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <h1 className="text-base font-bold tracking-tight text-gray-900">CycleRoute</h1>
           {lastFetchedAt && (
@@ -293,6 +321,48 @@ export function BottomSheet() {
               aria-valuetext={`${pendingMaxGapMeters} metres`}
               onChange={event => setPendingMaxGapMeters(Number(event.currentTarget.value))}
             />
+          </div>
+        </details>
+
+        <details className="group rounded-xl border border-gray-200 bg-white/70">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 text-sm font-semibold text-gray-700 [&::-webkit-details-marker]:hidden">
+            Settings
+            <ChevronDown
+              aria-hidden="true"
+              className="transition-transform group-open:rotate-180"
+              size={16}
+            />
+          </summary>
+          <div className="space-y-3 border-t border-gray-100 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-gray-700">
+                {cacheReady
+                  ? `${storedAreaCount} ${storedAreaCount === 1 ? 'area' : 'areas'} stored`
+                  : 'Checking stored map data…'}
+              </p>
+              {cacheReady && (
+                <p className="text-xs text-gray-400">{newestCacheLabel(newestStoredAt)}</p>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              className="w-full py-2 text-red-600 hover:text-red-700"
+              disabled={
+                !cacheReady ||
+                storedAreaCount === 0 ||
+                isClearingCache ||
+                isLoading ||
+                isCalculating
+              }
+              loading={isClearingCache}
+              onClick={() => void confirmAndClearCache()}
+            >
+              <Trash2 size={15} />
+              Clear stored map data
+            </Button>
+            <p className="text-xs text-gray-400">
+              Removes downloaded lanes and the current route. You can load the area again.
+            </p>
           </div>
         </details>
 

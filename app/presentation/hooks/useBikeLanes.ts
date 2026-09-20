@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchArea } from '~/application/use-cases/fetch-area'
 import { clearRouteCache } from '~/application/use-cases/build-route'
-import { listAreaBounds, loadArea } from '~/infrastructure/cache/area-cache'
+import { clearCachedData } from '~/application/use-cases/clear-cached-data'
+import {
+  getAreaCacheStats,
+  listAreaBounds,
+  loadArea,
+  pruneStaleAreas,
+} from '~/infrastructure/cache/area-cache'
 import { useMapStore } from '~/application/stores/map-store'
 import { bboxesIntersect, expandBbox } from '~/domain/entities/area'
 import type { BoundingBox, CachedArea } from '~/domain/entities/area'
@@ -39,24 +45,53 @@ export function useBikeLanes() {
   const mergeAreas = useMapStore(s => s.mergeAreas)
   const keepAreasIntersecting = useMapStore(s => s.keepAreasIntersecting)
   const setFetchError = useMapStore(s => s.setFetchError)
+  const [cacheReady, setCacheReady] = useState(false)
+  const [storedAreaCount, setStoredAreaCount] = useState(0)
+  const [newestStoredAt, setNewestStoredAt] = useState<Date | null>(null)
+  const [isClearingCache, setIsClearingCache] = useState(false)
+  const cacheGeneration = useRef(0)
+
+  const refreshCacheStats = useCallback(async () => {
+    const stats = await getAreaCacheStats()
+    setStoredAreaCount(stats.count)
+    setNewestStoredAt(stats.newestFetchedAt)
+  }, [])
 
   // Areas already looked at for this view, so a pan does not re-read the same
   // ones from IndexedDB on every move.
   const heldIds = useRef(new Set<string>())
   heldIds.current = new Set(loadedIds.map(area => area.id))
 
+  // Expiry removes data from storage, not only from what the map happens to load.
+  useEffect(() => {
+    let cancelled = false
+
+    async function prepareCache(): Promise<void> {
+      await pruneStaleAreas()
+      if (cancelled) return
+      await refreshCacheStats()
+      if (!cancelled) setCacheReady(true)
+    }
+
+    void prepareCache()
+    return () => {
+      cancelled = true
+    }
+  }, [refreshCacheStats])
+
   // Restore the cached areas near the map, and only those. Everything else
   // stays in IndexedDB until the rider moves there.
   useEffect(() => {
-    if (!bbox) return
+    if (!bbox || !cacheReady) return
     const view = expandBbox(bbox, LOAD_MARGIN)
+    const generation = cacheGeneration.current
     let cancelled = false
 
     listAreaBounds().then(async bounds => {
       const wanted = bounds.filter(entry => bboxesIntersect(entry.bbox, view))
       const missing = wanted.filter(entry => !heldIds.current.has(entry.id))
       const loaded = await Promise.all(missing.map(entry => loadArea(entry.id)))
-      if (cancelled) return
+      if (cancelled || generation !== cacheGeneration.current) return
 
       const fresh = loaded
         .filter((area): area is CachedArea => area !== undefined && !isStale(area))
@@ -69,7 +104,7 @@ export function useBikeLanes() {
     return () => {
       cancelled = true
     }
-  }, [bbox, mergeAreas, keepAreasIntersecting])
+  }, [bbox, cacheReady, mergeAreas, keepAreasIntersecting])
 
   const fetch = useCallback(async () => {
     if (!bbox || isLoading) return
@@ -85,12 +120,24 @@ export function useBikeLanes() {
     try {
       mergeAreas([await fetchArea(bbox, true)])
       clearRouteCache()
+      await refreshCacheStats()
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : 'Failed to fetch bike lanes')
     } finally {
       setLoading(false)
     }
-  }, [bbox, isLoading, setLoading, mergeAreas, setFetchError])
+  }, [bbox, isLoading, setLoading, mergeAreas, setFetchError, refreshCacheStats])
+
+  const clearStoredAreas = useCallback(async () => {
+    setIsClearingCache(true)
+    cacheGeneration.current += 1
+    try {
+      await clearCachedData()
+      await refreshCacheStats()
+    } finally {
+      setIsClearingCache(false)
+    }
+  }, [refreshCacheStats])
 
   const isAreaTooLarge = bbox
     ? (() => {
@@ -99,5 +146,16 @@ export function useBikeLanes() {
       })()
     : false
 
-  return { fetch, bikeLanes, isLoading, lastFetchedAt, isAreaTooLarge }
+  return {
+    fetch,
+    bikeLanes,
+    isLoading,
+    lastFetchedAt,
+    isAreaTooLarge,
+    cacheReady,
+    storedAreaCount,
+    newestStoredAt,
+    isClearingCache,
+    clearStoredAreas,
+  }
 }
