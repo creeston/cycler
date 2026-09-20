@@ -60,7 +60,7 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 | Cycle through alternative routes | **Shipped** | route batch cache in `buildRoute` |
 | Route metrics: distance, bike-lane coverage | **Shipped** | `BottomSheet` |
 | Route metric: gap count | Computed, **not displayed** | [`25`](../backlog/25-gap-count-metric-ui.md) |
-| GPX export | **Shipped** (minimal) | `downloadGpx` · [`20`](../backlog/20-gpx-hardening.md) |
+| GPX export | **Shipped** | `downloadGpx` · [`20`](../backlog/20-gpx-hardening.md) |
 | Geolocation marker and fly-to | **Shipped** | `CycleMap` |
 | Viewport restored between sessions | **Shipped** | `map-store` persist |
 | Round-trip (loop) routing | **Shipped** | `roundTripStrategy`, `BottomSheet` |
@@ -218,13 +218,12 @@ terminal node remain distinct ([`12`](../backlog/done/12-route-dedup-signature.m
 
 **Actor** Cyclist · **Trigger** Tap *Export GPX*
 
-Every coordinate of every segment — gaps included — is flattened into one `<trkseg>` and
-downloaded as `route.gpx`. The file is a GPX 1.1 track: no waypoints, no elevation, no
-timestamps, no per-segment metadata, and no distinction between lane and gap. It imports cleanly
-into Komoot, Garmin Connect, Strava and OsmAnd.
-
-**Known wrinkle** The track name is interpolated into XML unescaped
-([`20`](../backlog/20-gpx-hardening.md)).
+Every coordinate of every segment — gaps included — is exported as a GPX 1.1 track. Metadata
+records the route name, distance, lane coverage, gap count, creation time, bounds and a link to
+CycleRoute. Contiguous lane and gap runs are separate `<trkseg>` elements with their type in a
+namespaced extension; repeated joins within a run are omitted. The escaped track name cannot
+break the XML, and the downloaded filename includes the distance and route date. See
+[`20`](../backlog/20-gpx-hardening.md).
 
 ---
 

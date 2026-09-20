@@ -196,9 +196,10 @@ under jsdom.
 
 ### 3.3 Exporting GPX
 
-`BottomSheet` calls `downloadGpx(route)` directly. Every coordinate of every segment is flattened
-into a single `<trkseg>`, wrapped in a Blob and handed to a synthetic `<a download>` click. No
-elevation, no timestamps, no lane/gap distinction, and no XML escaping of the track name —
+`BottomSheet` calls `downloadGpx(route)` directly. The exporter writes GPX 1.1 metadata, bounds,
+and one `<trkseg>` per contiguous lane or gap run. A namespaced extension preserves each run's
+type, repeated source-segment joins are removed, and user-visible text is XML-escaped. The Blob is
+downloaded through a temporary attached anchor with a route-specific filename. See
 [`20-gpx-hardening`](../backlog/20-gpx-hardening.md).
 
 ---

@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- GPX 1.1 schema from https://www.topografix.com/GPX/1/1/gpx.xsd.
+     Documentation-only annotations are omitted; validation rules are unchanged. -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+  xmlns="http://www.topografix.com/GPX/1/1"
+  targetNamespace="http://www.topografix.com/GPX/1/1"
+  elementFormDefault="qualified">
+
+  <xsd:element name="gpx" type="gpxType" />
+
+  <xsd:complexType name="gpxType">
+    <xsd:sequence>
+      <xsd:element name="metadata" type="metadataType" minOccurs="0" />
+      <xsd:element name="wpt" type="wptType" minOccurs="0" maxOccurs="unbounded" />
+      <xsd:element name="rte" type="rteType" minOccurs="0" maxOccurs="unbounded" />
+      <xsd:element name="trk" type="trkType" minOccurs="0" maxOccurs="unbounded" />
+      <xsd:element name="extensions" type="extensionsType" minOccurs="0" />
+    </xsd:sequence>
+    <xsd:attribute name="version" type="xsd:string" use="required" fixed="1.1" />
+    <xsd:attribute name="creator" type="xsd:string" use="required" />
+  </xsd:complexType>
+
+  <xsd:complexType name="metadataType">
+    <xsd:sequence>
+      <xsd:element name="name" type="xsd:string" minOccurs="0" />
+      <xsd:element name="desc" type="xsd:string" minOccurs="0" />
+      <xsd:element name="author" type="personType" minOccurs="0" />
+      <xsd:element name="copyright" type="copyrightType" minOccurs="0" />
+      <xsd:element name="link" type="linkType" minOccurs="0" maxOccurs="unbounded" />
+      <xsd:element name="time" type="xsd:dateTime" minOccurs="0" />
+      <xsd:element name="keywords" type="xsd:string" minOccurs="0" />
+      <xsd:element name="bounds" type="boundsType" minOccurs="0" />
+      <xsd:element name="extensions" type="extensionsType" minOccurs="0" />
+    </xsd:sequence>
+  </xsd:complexType>
+
+  <xsd:complexType name="wptType">
+    <xsd:sequence>
+      <xsd:element name="ele" type="xsd:decimal" minOccurs="0" />
+      <xsd:element name="time" type="xsd:dateTime" minOccurs="0" />
+      <xsd:element name="magvar" type="degreesType" minOccurs="0" />
+      <xsd:element name="geoidheight" type="xsd:decimal" minOccurs="0" />
+      <xsd:element name="name" type="xsd:string" minOccurs="0" />
+      <xsd:element name="cmt" type="xsd:string" minOccurs="0" />
+      <xsd:element name="desc" type="xsd:string" minOccurs="0" />
+      <xsd:element name="src" type="xsd:string" minOccurs="0" />
+      <xsd:element name="link" type="linkType" minOccurs="0" maxOccurs="unbounded" />
+      <xsd:element name="sym" type="xsd:string" minOccurs="0" />
+      <xsd:element name="type" type="xsd:string" minOccurs="0" />
+      <xsd:element name="fix" type="fixType" minOccurs="0" />
+      <xsd:element name="sat" type="xsd:nonNegativeInteger" minOccurs="0" />
+      <xsd:element name="hdop" type="xsd:decimal" minOccurs="0" />
+      <xsd:element name="vdop" type="xsd:decimal" minOccurs="0" />
+      <xsd:element name="pdop" type="xsd:decimal" minOccurs="0" />
+      <xsd:element name="ageofdgpsdata" type="xsd:decimal" minOccurs="0" />
+      <xsd:element name="dgpsid" type="dgpsStationType" minOccurs="0" />
+      <xsd:element name="extensions" type="extensionsType" minOccurs="0" />
+    </xsd:sequence>
+    <xsd:attribute name="lat" type="latitudeType" use="required" />
+    <xsd:attribute name="lon" type="longitudeType" use="required" />
+  </xsd:complexType>
+
+  <xsd:complexType name="rteType">
+    <xsd:sequence>
+      <xsd:element name="name" type="xsd:string" minOccurs="0" />
+      <xsd:element name="cmt" type="xsd:string" minOccurs="0" />
+      <xsd:element name="desc" type="xsd:string" minOccurs="0" />
+      <xsd:element name="src" type="xsd:string" minOccurs="0" />
+      <xsd:element name="link" type="linkType" minOccurs="0" maxOccurs="unbounded" />
+      <xsd:element name="number" type="xsd:nonNegativeInteger" minOccurs="0" />
+      <xsd:element name="type" type="xsd:string" minOccurs="0" />
+      <xsd:element name="extensions" type="extensionsType" minOccurs="0" />
+      <xsd:element name="rtept" type="wptType" minOccurs="0" maxOccurs="unbounded" />
+    </xsd:sequence>
+  </xsd:complexType>
+
+  <xsd:complexType name="trkType">
+    <xsd:sequence>
+      <xsd:element name="name" type="xsd:string" minOccurs="0" />
+      <xsd:element name="cmt" type="xsd:string" minOccurs="0" />
+      <xsd:element name="desc" type="xsd:string" minOccurs="0" />
+      <xsd:element name="src" type="xsd:string" minOccurs="0" />
+      <xsd:element name="link" type="linkType" minOccurs="0" maxOccurs="unbounded" />
+      <xsd:element name="number" type="xsd:nonNegativeInteger" minOccurs="0" />
+      <xsd:element name="type" type="xsd:string" minOccurs="0" />
+      <xsd:element name="extensions" type="extensionsType" minOccurs="0" />
+      <xsd:element name="trkseg" type="trksegType" minOccurs="0" maxOccurs="unbounded" />
+    </xsd:sequence>
+  </xsd:complexType>
+
+  <xsd:complexType name="extensionsType">
+    <xsd:sequence>
+      <xsd:any namespace="##other" processContents="lax" minOccurs="0" maxOccurs="unbounded" />
+    </xsd:sequence>
+  </xsd:complexType>
+
+  <xsd:complexType name="trksegType">
+    <xsd:sequence>
+      <xsd:element name="trkpt" type="wptType" minOccurs="0" maxOccurs="unbounded" />
+      <xsd:element name="extensions" type="extensionsType" minOccurs="0" />
+    </xsd:sequence>
+  </xsd:complexType>
+
+  <xsd:complexType name="copyrightType">
+    <xsd:sequence>
+      <xsd:element name="year" type="xsd:gYear" minOccurs="0" />
+      <xsd:element name="license" type="xsd:anyURI" minOccurs="0" />
+    </xsd:sequence>
+    <xsd:attribute name="author" type="xsd:string" use="required" />
+  </xsd:complexType>
+
+  <xsd:complexType name="linkType">
+    <xsd:sequence>
+      <xsd:element name="text" type="xsd:string" minOccurs="0" />
+      <xsd:element name="type" type="xsd:string" minOccurs="0" />
+    </xsd:sequence>
+    <xsd:attribute name="href" type="xsd:anyURI" use="required" />
+  </xsd:complexType>
+
+  <xsd:complexType name="emailType">
+    <xsd:attribute name="id" type="xsd:string" use="required" />
+    <xsd:attribute name="domain" type="xsd:string" use="required" />
+  </xsd:complexType>
+
+  <xsd:complexType name="personType">
+    <xsd:sequence>
+      <xsd:element name="name" type="xsd:string" minOccurs="0" />
+      <xsd:element name="email" type="emailType" minOccurs="0" />
+      <xsd:element name="link" type="linkType" minOccurs="0" />
+    </xsd:sequence>
+  </xsd:complexType>
+
+  <xsd:complexType name="ptType">
+    <xsd:sequence>
+      <xsd:element name="ele" type="xsd:decimal" minOccurs="0" />
+      <xsd:element name="time" type="xsd:dateTime" minOccurs="0" />
+    </xsd:sequence>
+    <xsd:attribute name="lat" type="latitudeType" use="required" />
+    <xsd:attribute name="lon" type="longitudeType" use="required" />
+  </xsd:complexType>
+
+  <xsd:complexType name="ptsegType">
+    <xsd:sequence>
+      <xsd:element name="pt" type="ptType" minOccurs="0" maxOccurs="unbounded" />
+    </xsd:sequence>
+  </xsd:complexType>
+
+  <xsd:complexType name="boundsType">
+    <xsd:attribute name="minlat" type="latitudeType" use="required" />
+    <xsd:attribute name="minlon" type="longitudeType" use="required" />
+    <xsd:attribute name="maxlat" type="latitudeType" use="required" />
+    <xsd:attribute name="maxlon" type="longitudeType" use="required" />
+  </xsd:complexType>
+
+  <xsd:simpleType name="latitudeType">
+    <xsd:restriction base="xsd:decimal">
+      <xsd:minInclusive value="-90.0" />
+      <xsd:maxInclusive value="90.0" />
+    </xsd:restriction>
+  </xsd:simpleType>
+
+  <xsd:simpleType name="longitudeType">
+    <xsd:restriction base="xsd:decimal">
+      <xsd:minInclusive value="-180.0" />
+      <xsd:maxExclusive value="180.0" />
+    </xsd:restriction>
+  </xsd:simpleType>
+
+  <xsd:simpleType name="degreesType">
+    <xsd:restriction base="xsd:decimal">
+      <xsd:minInclusive value="0.0" />
+      <xsd:maxExclusive value="360.0" />
+    </xsd:restriction>
+  </xsd:simpleType>
+
+  <xsd:simpleType name="fixType">
+    <xsd:restriction base="xsd:string">
+      <xsd:enumeration value="none" />
+      <xsd:enumeration value="2d" />
+      <xsd:enumeration value="3d" />
+      <xsd:enumeration value="dgps" />
+      <xsd:enumeration value="pps" />
+    </xsd:restriction>
+  </xsd:simpleType>
+
+  <xsd:simpleType name="dgpsStationType">
+    <xsd:restriction base="xsd:integer">
+      <xsd:minInclusive value="0" />
+      <xsd:maxInclusive value="1023" />
+    </xsd:restriction>
+  </xsd:simpleType>
+</xsd:schema>
