@@ -6,6 +6,7 @@ import {
   buildGraph,
   gapPenaltyFactor,
   getGapStats,
+  getLaneStats,
   getMaxGapMeters,
   nearestNode,
 } from './graph'
@@ -235,6 +236,85 @@ describe('buildGraph lane splitting', () => {
     const g = buildGraph([a, b], 0)
     expect(g.order).toBe(3)
     expect(g.size).toBe(2)
+  })
+})
+
+// ── closed loops and parallel lanes ──────────────────────────
+
+describe('buildGraph closed loops and parallel lanes', () => {
+  const scenic: [number, number][] = [
+    [0, 0],
+    [0, 0.0018],
+    [0.0018, 0.0018],
+    [0.0018, 0],
+  ]
+  const direct: [number, number][] = [
+    [0, 0],
+    [0.0018, 0],
+  ]
+
+  it('represents parallel lanes the same way whichever is ingested first', () => {
+    const scenicFirst = buildGraph([makeLane('s', scenic), makeLane('d', direct)], 0)
+    const directFirst = buildGraph([makeLane('d', direct), makeLane('s', scenic)], 0)
+    for (const g of [scenicFirst, directFirst]) {
+      expect(g.order).toBe(3)
+      expect(g.size).toBe(3)
+      expect(g.hasEdge(coordKey(0, 0), coordKey(0.0018, 0))).toBe(true)
+      expect(g.hasEdge(coordKey(0, 0), coordKey(0, 0.0018))).toBe(true)
+      expect(g.hasEdge(coordKey(0, 0.0018), coordKey(0.0018, 0))).toBe(true)
+      expect(getLaneStats(g)).toMatchObject({ splitParallel: 1, droppedParallel: 0 })
+    }
+  })
+
+  it('keeps both halves of a loop that another lane touches at one vertex', () => {
+    // The stub meets the square at C. Splitting there leaves two pieces
+    // between A and C; the second is cut again at D so the whole loop stays.
+    const loop = makeLane('loop', [
+      [0, 0],
+      [0.001, 0],
+      [0.001, 0.001],
+      [0, 0.001],
+      [0, 0],
+    ])
+    const stub = makeLane('stub', [
+      [0.001, 0.001],
+      [0.002, 0.002],
+    ])
+    const g = buildGraph([loop, stub], 0)
+    const stats = getLaneStats(g)
+    expect(g.order).toBe(4)
+    expect(g.size).toBe(4)
+    expect(stats.edgeMeters).toBeCloseTo(stats.laneMeters, 6)
+    expect(stats).toMatchObject({ splitParallel: 1, splitClosedLoops: 0, droppedMeters: 0 })
+  })
+
+  it('keeps one edge for a duplicated way and counts the other as dropped', () => {
+    const g = buildGraph([makeLane('a', direct), makeLane('b', direct)], 0)
+    const stats = getLaneStats(g)
+    expect(g.size).toBe(1)
+    expect(stats).toMatchObject({ lanes: 2, pieces: 2, edges: 1, droppedParallel: 1 })
+    expect(stats.droppedMeters).toBeCloseTo(stats.laneMeters / 2, 6)
+    expect(stats.edgeMeters + stats.droppedMeters).toBeCloseTo(stats.laneMeters, 6)
+  })
+
+  it('drops a closed piece with no interior vertex and counts its length', () => {
+    // Out and back along one segment: A–B–A. Cut at B, the return half is a
+    // duplicate of the outbound half with nothing left to cut.
+    const g = buildGraph(
+      [
+        makeLane('a', [
+          [0, 0],
+          [0.001, 0],
+          [0, 0],
+        ]),
+      ],
+      0,
+    )
+    const stats = getLaneStats(g)
+    expect(g.order).toBe(2)
+    expect(g.size).toBe(1)
+    expect(stats).toMatchObject({ splitClosedLoops: 1, edges: 1, droppedParallel: 1 })
+    expect(stats.droppedMeters).toBeCloseTo(stats.laneMeters / 2, 6)
   })
 })
 

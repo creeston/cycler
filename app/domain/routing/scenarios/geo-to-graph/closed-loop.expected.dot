@@ -1,0 +1,16 @@
+// One OSM way that returns to its start: a square park circuit, ~111 m a side
+// (0.001° at the equator), that no other lane touches. Both ends snap to A, so
+// a single edge cannot hold it. buildGraph cuts it at the vertex nearest its
+// middle (C) and, because the two halves would join the same pair of nodes,
+// cuts the second half again at D. Three edges, one cycle, nothing dropped.
+//
+//   D ══════ C
+//   ║        ║
+//   A ══════ B
+//     (lane-1, one closed way)
+//
+graph closed_loop {
+  A -- C [type=lane]
+  C -- D [type=lane]
+  D -- A [type=lane]
+}

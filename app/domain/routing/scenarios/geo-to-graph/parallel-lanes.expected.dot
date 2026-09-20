@@ -1,0 +1,16 @@
+// Two ways between the same endpoints: a 600 m scenic detour through P and Q
+// (three sides of 0.0018° ≈ 200 m each) and a 200 m direct connector. The
+// scenic way is ingested first. A simple graph holds one edge per node pair,
+// so buildGraph cuts the second piece between A and B at the vertex nearest
+// its middle. The direct way has no interior vertex; the scenic one has P,
+// so the scenic way is the one cut, and both are represented.
+//
+//   P ══════ Q
+//   ║        ║   scenic, 600 m
+//   A ══════ B   direct, 200 m
+//
+graph parallel_lanes {
+  A -- B [type=lane]
+  A -- P [type=lane]
+  P -- B [type=lane]
+}

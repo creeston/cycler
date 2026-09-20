@@ -53,6 +53,30 @@ export interface GapStats {
   barriersChecked: boolean
 }
 
+/** Counts from the lane pass, so every fetched lane is either in the graph or accounted for. */
+export interface LaneStats {
+  /** Lanes given to buildGraph. */
+  lanes: number
+  /** Total length of those lanes in metres. */
+  laneMeters: number
+  /** Pieces the lanes were cut into, at junctions and by the cuts below (docs/algorithms.md §3.2). */
+  pieces: number
+  /** Pieces that became lane edges. */
+  edges: number
+  /** Total length of the lane edges in metres. */
+  edgeMeters: number
+  /** Pieces cut in two because both ends snapped to one node: closed loops nothing else touches. */
+  splitClosedLoops: number
+  /** Pieces cut in two because a lane edge already joined their two nodes. */
+  splitParallel: number
+  /** Closed pieces dropped because they had no interior vertex to cut at. */
+  droppedClosedLoops: number
+  /** Parallel pieces dropped because neither rival had an interior vertex; the shorter one stays. */
+  droppedParallel: number
+  /** Length of the dropped pieces in metres. */
+  droppedMeters: number
+}
+
 /** The graph's nodes in a spatial index; `keys[i]` is the node at point i. */
 export interface NodeIndex {
   keys: string[]
@@ -60,6 +84,7 @@ export interface NodeIndex {
 }
 
 export interface GraphAttrs {
+  laneStats?: LaneStats
   gapStats?: GapStats
   /** The gap tolerance this graph was built with. */
   maxGapMeters?: number
@@ -86,6 +111,19 @@ export const MAX_GAP_EDGES_PER_NODE = 2
  * gap tolerance itself, which makes the gap pass a nine-cell lookup.
  */
 const INDEX_CELL_METERS_WITHOUT_GAPS = 200
+
+const EMPTY_LANE_STATS: LaneStats = {
+  lanes: 0,
+  laneMeters: 0,
+  pieces: 0,
+  edges: 0,
+  edgeMeters: 0,
+  splitClosedLoops: 0,
+  splitParallel: 0,
+  droppedClosedLoops: 0,
+  droppedParallel: 0,
+  droppedMeters: 0,
+}
 
 const EMPTY_GAP_STATS: GapStats = {
   candidates: 0,
@@ -219,34 +257,60 @@ function runReachesEnd(keys: string[], i: number): boolean {
   return true
 }
 
+/** A run of one lane's geometry that becomes one edge, unless cut further. */
+interface LanePiece {
+  lane: BikeLane
+  coords: Position[]
+  level: number
+}
+
 /**
  * Adds lane edges and returns the levels each node sits on. A lane becomes one
  * edge per piece between junctions (splitAtJunctions), so lanes that meet away
  * from their endpoints are connected. A node can carry several levels when
  * lanes at different heights pass through the same spot.
  */
-function addLaneEdges(graph: BikeLaneGraph, lanes: BikeLane[]): Map<string, Set<number>> {
+function addLaneEdges(
+  graph: BikeLaneGraph,
+  lanes: BikeLane[],
+): { levels: Map<string, Set<number>>; stats: LaneStats } {
   const levels = new Map<string, Set<number>>()
+  const stats: LaneStats = { ...EMPTY_LANE_STATS, lanes: lanes.length }
+  const pieceOf = new Map<string, LanePiece>()
   const laneKeys = lanes.map(laneVertexKeys)
   const laneCounts = countLanesPerVertex(laneKeys)
 
   lanes.forEach((lane, i) => {
     const level = osmLevel(lane.tags)
+    stats.laneMeters += turf.length(turf.feature(lane.geometry), { units: 'meters' })
     for (const coords of splitAtJunctions(lane.geometry.coordinates, laneKeys[i], laneCounts)) {
-      addLanePiece(graph, levels, lane, coords, level)
+      addLanePiece(graph, levels, stats, pieceOf, { lane, coords, level })
     }
   })
 
-  return levels
+  return { levels, stats }
 }
 
+/**
+ * Adds a piece as one edge between its snapped ends. The graph is simple, so
+ * two pieces cannot fit as they are: one whose ends snap to the same node (a
+ * closed loop nothing else touches) and one whose nodes a lane edge already
+ * joins (a parallel lane). Either is cut at an interior vertex and both halves
+ * added, which turns a loop into a cycle of three edges and keeps a parallel
+ * lane as two edges through a new node. When the parallel piece has no
+ * interior vertex but the edge it rivals does, the edge is cut instead, so the
+ * result does not depend on ingestion order. Only when neither can be cut is
+ * a piece dropped: a closed piece as a whole, and of two straight parallel
+ * pieces the longer one. Every outcome is counted in `stats`.
+ */
 function addLanePiece(
   graph: BikeLaneGraph,
   levels: Map<string, Set<number>>,
-  lane: BikeLane,
-  coords: Position[],
-  level: number,
+  stats: LaneStats,
+  pieceOf: Map<string, LanePiece>,
+  piece: LanePiece,
 ): void {
+  const { lane, coords, level } = piece
   const start = coords[0]
   const end = coords[coords.length - 1]
   const startKey = coordKey(start[0], start[1])
@@ -260,14 +324,50 @@ function addLanePiece(
   recordLevel(levels, startKey, level)
   recordLevel(levels, endKey, level)
 
-  if (startKey === endKey || graph.hasEdge(startKey, endKey)) return
+  const closed = startKey === endKey
+  const rivalEdge = closed ? undefined : graph.edge(startKey, endKey)
+
+  if (closed || rivalEdge !== undefined) {
+    const cut = interiorCut(coords, startKey, endKey)
+    if (cut !== -1) {
+      if (closed) stats.splitClosedLoops++
+      else stats.splitParallel++
+      addLanePiece(graph, levels, stats, pieceOf, { ...piece, coords: coords.slice(0, cut + 1) })
+      addLanePiece(graph, levels, stats, pieceOf, { ...piece, coords: coords.slice(cut) })
+      return
+    }
+  }
+
+  if (rivalEdge !== undefined) {
+    const rival = pieceOf.get(rivalEdge)!
+    const cut = interiorCut(rival.coords, startKey, endKey)
+    if (cut !== -1) {
+      removeLaneEdge(graph, stats, pieceOf, rivalEdge)
+      stats.splitParallel++
+      addLanePiece(graph, levels, stats, pieceOf, {
+        ...rival,
+        coords: rival.coords.slice(0, cut + 1),
+      })
+      addLanePiece(graph, levels, stats, pieceOf, { ...rival, coords: rival.coords.slice(cut) })
+      addLanePiece(graph, levels, stats, pieceOf, piece)
+      return
+    }
+  }
 
   const geometry: LineString =
     coords === lane.geometry.coordinates
       ? lane.geometry
       : { type: 'LineString', coordinates: coords }
   const dist = turf.length(turf.feature(geometry), { units: 'meters' })
-  graph.addEdge(startKey, endKey, {
+  stats.pieces++
+
+  if (closed) {
+    stats.droppedClosedLoops++
+    stats.droppedMeters += dist
+    return
+  }
+
+  const attrs: EdgeAttrs = {
     startKey,
     endKey,
     distanceMeters: dist,
@@ -277,7 +377,59 @@ function addLanePiece(
     laneType: lane.laneType,
     ...(lane.surface !== undefined ? { surface: lane.surface } : {}),
     tags: lane.tags,
-  })
+  }
+
+  if (rivalEdge !== undefined) {
+    const rivalDist = graph.getEdgeAttribute(rivalEdge, 'distanceMeters')
+    stats.droppedParallel++
+    if (dist >= rivalDist) {
+      stats.droppedMeters += dist
+      return
+    }
+    stats.droppedMeters += rivalDist
+    stats.edgeMeters += dist - rivalDist
+    graph.replaceEdgeAttributes(rivalEdge, attrs)
+    pieceOf.set(rivalEdge, piece)
+    return
+  }
+
+  stats.edges++
+  stats.edgeMeters += dist
+  pieceOf.set(graph.addEdge(startKey, endKey, attrs), piece)
+}
+
+/**
+ * The index of the interior vertex nearest the middle of a piece whose snapped
+ * key differs from both ends, or -1 when there is none. Cutting there gives two
+ * pieces that meet at a node of their own.
+ */
+function interiorCut(coords: Position[], startKey: string, endKey: string): number {
+  const last = coords.length - 1
+  const mid = Math.floor(last / 2)
+  for (let before = mid, after = mid + 1; before > 0 || after < last; before--, after++) {
+    if (before > 0 && isCutVertex(coords[before], startKey, endKey)) return before
+    if (after < last && isCutVertex(coords[after], startKey, endKey)) return after
+  }
+  return -1
+}
+
+function isCutVertex(vertex: Position, startKey: string, endKey: string): boolean {
+  const key = coordKey(vertex[0], vertex[1])
+  return key !== startKey && key !== endKey
+}
+
+/** Takes a lane edge back out so its piece can be added again in halves. */
+function removeLaneEdge(
+  graph: BikeLaneGraph,
+  stats: LaneStats,
+  pieceOf: Map<string, LanePiece>,
+  edge: string,
+): void {
+  stats.pieces--
+  stats.edges--
+  stats.edgeMeters -= graph.getEdgeAttribute(edge, 'distanceMeters')
+  pieceOf.delete(edge)
+  graph.dropEdge(edge)
 }
 
 function recordLevel(levels: Map<string, Set<number>>, key: string, level: number): void {
@@ -511,7 +663,7 @@ export function buildGraph(
 ): BikeLaneGraph {
   const graph: BikeLaneGraph = new Graph({ type: 'undirected', multi: false })
 
-  const levels = addLaneEdges(graph, lanes)
+  const { levels, stats: laneStats } = addLaneEdges(graph, lanes)
   const index = buildNodeIndex(
     graph,
     maxGapMeters > 0 ? maxGapMeters : INDEX_CELL_METERS_WITHOUT_GAPS,
@@ -529,6 +681,7 @@ export function buildGraph(
           options.gapPenalty ?? gapPenaltyFactor,
         )
       : EMPTY_GAP_STATS
+  graph.setAttribute('laneStats', laneStats)
   graph.setAttribute('gapStats', stats)
   graph.setAttribute('maxGapMeters', maxGapMeters)
   graph.setAttribute('nodeIndex', index)
@@ -539,6 +692,11 @@ export function buildGraph(
 /** The gap tolerance a graph was built with; 0 for graphs not built by buildGraph. */
 export function getMaxGapMeters(graph: BikeLaneGraph): number {
   return graph.getAttribute('maxGapMeters') ?? 0
+}
+
+/** Lane pass counts for a graph, all zero for graphs not built by buildGraph. */
+export function getLaneStats(graph: BikeLaneGraph): LaneStats {
+  return graph.getAttribute('laneStats') ?? EMPTY_LANE_STATS
 }
 
 /** Gap pruning counts for a graph, all zero for graphs not built by buildGraph. */

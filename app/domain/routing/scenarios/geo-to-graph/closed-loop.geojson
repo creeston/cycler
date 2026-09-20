@@ -1,0 +1,27 @@
+{
+  "_maxGapMeters": 0,
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "lane-1",
+        "highway": "cycleway",
+        "name": "Park circuit A–B–C–D–A",
+        "_nodeStart": "A",
+        "_nodeEnd": "A",
+        "_nodeVia": ["B", "C", "D"]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [0.00000, 0.00000],
+          [0.00100, 0.00000],
+          [0.00100, 0.00100],
+          [0.00000, 0.00100],
+          [0.00000, 0.00000]
+        ]
+      }
+    }
+  ]
+}

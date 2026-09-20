@@ -144,25 +144,34 @@ recently merged that node.
 Each lane is cut at its junction vertices (`splitAtJunctions`) into one or more **pieces**; a lane
 with no interior junction is one piece. Consecutive vertices that fall inside the same snapping
 cell count as one junction, cut at the first of them, so no sub-metre piece is created and no
-length is lost. For each piece `π` with endpoint keys `(u, v)`:
+length is lost. Each piece `π` with endpoint keys `(u, v)` becomes the edge `(u, v)` with attributes
+`{ distanceMeters: turf.length(π), isGap: false, geometry: π, laneType, surface, tags }`, the last
+three copied from the parent lane. `distanceMeters` is the length of the piece's own geometry, so
+the sum over all lane edges equals the sum of `turf.length` over the input lanes (37 098 m on the
+Warsaw fixture, exactly).
 
-$$
-(u,v) \in E \iff u \neq v \ \wedge\ (u,v) \notin E \ \text{already}
-$$
+The graph is simple, so two kinds of piece cannot become an edge as they are. Both are cut at
+the interior vertex nearest their middle whose key differs from both ends (`interiorCut`), and
+the halves are added by the same rule, recursively:
 
-with attributes `{ distanceMeters: turf.length(π), isGap: false, geometry: π, laneType, surface,
-tags }`, the last three copied from the parent lane. `distanceMeters` is the length of the piece's
-own geometry, so the sum over all lane edges equals the sum of `turf.length` over the input lanes
-(37 098 m on the Warsaw fixture, exactly).
+- **Closed loops** (`u = v`): a park circuit tagged as a single way that no other lane touches.
+  The cut gives two pieces between `u` and the cut vertex; the second is parallel to the first
+  and is cut again, so the loop becomes a cycle of three edges. A loop that another lane touches
+  inside is split there by `splitAtJunctions` and its two pieces are parallel, which the same
+  rule resolves.
+- **Parallel pieces** (`(u, v)` already in `E`): a second way between the same two snapped
+  nodes, such as the two directions of a route mapped separately or a scenic alternative beside a
+  direct connector. The new piece is cut and becomes two edges through a new node. When it has no
+  interior vertex but the existing edge does, the existing edge is taken out and cut instead, so
+  the result does not depend on the order Overpass returned the ways.
 
-Two kinds of piece are silently discarded by this rule:
-
-- **Closed loops** (`u = v`): a park circuit tagged as a single way with no other lane touching it
-  disappears entirely. A loop that another lane touches inside is now split there and kept.
-- **Parallel pieces**: a second way between the same two snapped nodes is dropped, and the first
-  one ingested wins regardless of length.
-
-See [`21-dropped-lanes`](../backlog/21-dropped-lanes.md).
+A piece is dropped only when nothing can be cut: a closed piece with no interior vertex (which
+is sub-metre), and the longer of two straight parallel pieces, which is a duplicate way. The
+counts are stored as the graph attribute `laneStats` and read with `getLaneStats`: lanes and
+their length in, pieces, lane edges and their length out, pieces cut for each reason, pieces
+dropped for each reason, and the dropped length. On the Warsaw fixture nothing is cut or dropped:
+310 lanes, 378 pieces, 378 edges, and `edgeMeters` equals `laneMeters`
+([`21-dropped-lanes`](../backlog/done/21-dropped-lanes.md)).
 
 #### What splitting did on the Warsaw Bemowo fixture
 
@@ -898,8 +907,9 @@ Three layers, deliberately separated:
 - **`geo-to-graph`** — does geometry become the right graph? A `.geojson` file annotated with
   `_nodeStart`/`_nodeEnd` names is converted, then compared against an `.expected.dot` listing
   the nodes and edges (with `type=gap` marking synthetic edges). Covers endpoint merging, gap
-  bridging, three-way junctions, a T-junction at an interior vertex, closed triangles and
-  clustered endpoints that must **not** be bridged.
+  bridging, three-way junctions, a T-junction at an interior vertex, closed triangles, a single
+  closed way, two ways between the same endpoints, and clustered endpoints that must **not** be
+  bridged.
 - **`graph-to-path`** — given a graph, does the router find the right paths? A `.dot` file carries
   both the graph and its assertions as graph attributes (`start`, `end`, `minDist`, `maxDist`,
   `roundTrip`, `expect_route`, `expect_any_route`, `expect_isRoundTrip`, `expect_minRoutes`,
@@ -927,7 +937,7 @@ Three layers, deliberately separated:
 Each `.dot` file opens with an ASCII sketch of the graph it encodes, which makes the fixtures
 reviewable without running them.
 
-**Current coverage: 210 tests, all passing.** The gaps are above the domain line — no tests for
+**Current coverage: 216 tests, all passing.** The gaps are above the domain line — no tests for
 the stores, hooks, Overpass client, IndexedDB cache or GPX writer
 ([`22-use-case-tests`](../backlog/22-use-case-tests.md)).
 

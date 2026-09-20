@@ -1,0 +1,43 @@
+{
+  "_maxGapMeters": 0,
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "lane-scenic",
+        "highway": "cycleway",
+        "name": "Scenic A–P–Q–B",
+        "_nodeStart": "A",
+        "_nodeEnd": "B",
+        "_nodeVia": ["P", "Q"]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [0.00000, 0.00000],
+          [0.00000, 0.00180],
+          [0.00180, 0.00180],
+          [0.00180, 0.00000]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "lane-direct",
+        "highway": "cycleway",
+        "name": "Direct A–B",
+        "_nodeStart": "A",
+        "_nodeEnd": "B"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [0.00000, 0.00000],
+          [0.00180, 0.00000]
+        ]
+      }
+    }
+  ]
+}

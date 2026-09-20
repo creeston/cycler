@@ -306,8 +306,10 @@ the rest are gaps in the current suite and are worth adding as you go.
 - ✅ Lollipop: the only way home repeats an edge, so no loop — `round-trip-lollipop.dot`
 - ⬜ Start node with no edges at all
 - ⬜ Single-node graph
-- ⬜ Parallel edges between the same pair — currently dropped ([21](../backlog/21-dropped-lanes.md))
-- ⬜ Self-loop / closed way — currently dropped ([21](../backlog/21-dropped-lanes.md))
+- ✅ Parallel edges between the same pair — `geo-to-graph/parallel-lanes` (they become a cycle
+  through a new node, so the graph stays simple; [21](../backlog/done/21-dropped-lanes.md))
+- ✅ Self-loop / closed way — `geo-to-graph/closed-loop` (becomes a cycle of three edges;
+  [21](../backlog/done/21-dropped-lanes.md))
 
 **Distance bounds**
 
@@ -371,8 +373,10 @@ a scenario should not depend on.
 
 Only when changing `buildGraph`. A scenario is a **pair** of files sharing a base name.
 
-The `.geojson` is a normal `FeatureCollection` with two additions: a top-level `_maxGapMeters`
-controlling gap insertion, and `_nodeStart` / `_nodeEnd` properties naming each lane's endpoints.
+The `.geojson` is a normal `FeatureCollection` with three additions: a top-level `_maxGapMeters`
+controlling gap insertion, `_nodeStart` / `_nodeEnd` properties naming each lane's endpoints, and
+an optional `_nodeVia` array naming its interior vertices in order (`null` skips one), for
+scenarios where `buildGraph` makes a node out of one.
 
 ```json
 {

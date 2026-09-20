@@ -3,6 +3,7 @@ import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { loadGeoGraphScenario } from './test-utils/geo-graph-scenario'
 import type { GeoGraphScenario } from './test-utils/geo-graph-scenario'
+import { getLaneStats } from './graph'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dir = join(__dirname, 'scenarios', 'geo-to-graph')
@@ -24,6 +25,13 @@ function checkGeoGraph(sc: GeoGraphScenario) {
     ).toBe(true)
     expect(sc.graph.getEdgeAttribute(sc.graph.edge(fromKey!, toKey!), 'isGap')).toBe(isGap)
   }
+}
+
+/** Every metre of input lane is in some lane edge: nothing was dropped. */
+function checkLaneLengthConserved(sc: GeoGraphScenario) {
+  const stats = getLaneStats(sc.graph)
+  expect(stats.edgeMeters).toBeCloseTo(stats.laneMeters, 6)
+  expect(stats.droppedMeters).toBe(0)
 }
 
 describe('geo to graph conversion scenarios', () => {
@@ -51,5 +59,17 @@ describe('geo to graph conversion scenarios', () => {
 
   it('t-junction: a lane ending at an interior vertex of another is joined there', () => {
     checkGeoGraph(loadGeoGraphScenario(geojson('t-junction'), expectedDot('t-junction')))
+  })
+
+  it('closed-loop: a single way returning to its start becomes a routable cycle', () => {
+    const sc = loadGeoGraphScenario(geojson('closed-loop'), expectedDot('closed-loop'))
+    checkGeoGraph(sc)
+    checkLaneLengthConserved(sc)
+  })
+
+  it('parallel-lanes: two ways between the same endpoints are both represented', () => {
+    const sc = loadGeoGraphScenario(geojson('parallel-lanes'), expectedDot('parallel-lanes'))
+    checkGeoGraph(sc)
+    checkLaneLengthConserved(sc)
   })
 })

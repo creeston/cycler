@@ -20,7 +20,9 @@ export interface GeoGraphScenario {
  *
  * GeoJSON features must include `_nodeStart` and `_nodeEnd` properties to name
  * their endpoints — these names must match the node names used in the .dot file.
- * An optional top-level `_maxGapMeters` controls gap edge insertion.
+ * An optional `_nodeVia` array names the interior vertices in order; `null`
+ * leaves one unnamed. An optional top-level `_maxGapMeters` controls gap edge
+ * insertion.
  */
 export function loadGeoGraphScenario(
   geojsonPath: string,
@@ -37,13 +39,20 @@ export function loadGeoGraphScenario(
   for (const feature of fc.features) {
     if (feature.geometry?.type !== 'LineString') continue
     const coords = (feature.geometry as LineString).coordinates
-    const props = (feature.properties ?? {}) as Record<string, string>
+    const props = (feature.properties ?? {}) as {
+      _nodeStart?: string
+      _nodeEnd?: string
+      _nodeVia?: Array<string | null>
+    }
     if (props._nodeStart) nameToKey.set(props._nodeStart, coordKey(coords[0][0], coords[0][1]))
     if (props._nodeEnd)
       nameToKey.set(
         props._nodeEnd,
         coordKey(coords[coords.length - 1][0], coords[coords.length - 1][1]),
       )
+    props._nodeVia?.forEach((name, i) => {
+      if (name) nameToKey.set(name, coordKey(coords[i + 1][0], coords[i + 1][1]))
+    })
   }
 
   const { edges: dotEdges } = parseDot(readFileSync(expectedDotPath, 'utf-8'))
