@@ -35,7 +35,8 @@ export async function loadArea(id: string): Promise<CachedArea | undefined> {
   if (!db) return undefined
 
   try {
-    return await db.get('areas', id)
+    const area = await db.get('areas', id)
+    return area ? reviveCachedArea(area) : undefined
   } catch (err) {
     console.warn(`Could not read cached area ${id}.`, err)
     return undefined
@@ -69,7 +70,7 @@ export async function loadAllAreas(): Promise<CachedArea[]> {
   if (!db) return []
 
   try {
-    return await db.getAll('areas')
+    return (await db.getAll('areas')).map(reviveCachedArea)
   } catch (err) {
     console.warn('Could not read the cached areas.', err)
     return []
@@ -108,7 +109,7 @@ export async function clearCachedAreas(): Promise<void> {
 }
 
 export function isAreaStale(area: CachedArea, now = Date.now()): boolean {
-  return now - new Date(area.fetchedAt).getTime() >= AREA_CACHE_STALE_AFTER_MS
+  return now - area.fetchedAt.getTime() >= AREA_CACHE_STALE_AFTER_MS
 }
 
 export async function pruneStaleAreas(): Promise<void> {
@@ -116,10 +117,15 @@ export async function pruneStaleAreas(): Promise<void> {
   if (!db) return
 
   try {
-    const all = await db.getAll('areas')
+    const all = (await db.getAll('areas')).map(reviveCachedArea)
     const stale = all.filter(area => isAreaStale(area))
     await Promise.all(stale.map(a => db.delete('areas', a.id)))
   } catch (err) {
     console.warn('Could not prune stale cached areas.', err)
   }
+}
+
+/** Restores values that crossed a persistence boundary to the domain shape. */
+function reviveCachedArea(area: CachedArea): CachedArea {
+  return { ...area, fetchedAt: new Date(area.fetchedAt) }
 }

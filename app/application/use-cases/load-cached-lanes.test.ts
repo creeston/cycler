@@ -11,7 +11,7 @@ import { getLaneCacheStats, initializeLaneCache, loadCachedLanes } from './load-
 vi.mock('~/infrastructure/cache/area-cache', () => ({
   getAreaCacheStats: vi.fn(),
   isAreaStale: (area: CachedArea) =>
-    Date.now() - new Date(area.fetchedAt).getTime() >= 7 * 24 * 60 * 60 * 1000,
+    Date.now() - area.fetchedAt.getTime() >= 7 * 24 * 60 * 60 * 1000,
   listAreaBounds: vi.fn(),
   loadArea: vi.fn(),
   pruneStaleAreas: vi.fn(),

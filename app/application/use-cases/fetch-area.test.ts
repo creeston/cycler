@@ -8,7 +8,7 @@ import type { BoundingBox, CachedArea } from '~/domain/entities/area'
 vi.mock('~/infrastructure/osm/overpass-client', () => ({ fetchOverpassGeoJSON: vi.fn() }))
 vi.mock('~/infrastructure/cache/area-cache', () => ({
   isAreaStale: (area: CachedArea) =>
-    Date.now() - new Date(area.fetchedAt).getTime() >= 7 * 24 * 60 * 60 * 1000,
+    Date.now() - area.fetchedAt.getTime() >= 7 * 24 * 60 * 60 * 1000,
   loadAllAreas: vi.fn(),
   loadArea: vi.fn(),
   saveArea: vi.fn(),

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import { DEFAULT_PREFERENCES } from '~/domain/entities/route'
 import type { Route, RoutePreferences } from '~/domain/entities/route'
 
@@ -37,6 +37,12 @@ export const useRoutingStore = create<RoutingStore>()(
     }),
     {
       name: 'cycle-routing',
+      // Persisted slices are JSON. Any non-JSON primitive added here needs an
+      // equivalent replacer/reviver so the rehydrated state still matches its type.
+      storage: createJSONStorage(() => localStorage, {
+        reviver: (key, value) =>
+          key === 'createdAt' && typeof value === 'string' ? new Date(value) : value,
+      }),
       partialize: state => ({ currentRoute: state.currentRoute, preferences: state.preferences }),
     },
   ),

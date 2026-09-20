@@ -53,7 +53,7 @@ interface DerivedAreaState {
  * verified.
  */
 function derive(areas: CachedArea[]): DerivedAreaState {
-  const fetchTimes = areas.map(a => new Date(a.fetchedAt).getTime())
+  const fetchTimes = areas.map(a => a.fetchedAt.getTime())
   return {
     areas,
     bikeLanes: areas.flatMap(a => a.bikeLanes),
