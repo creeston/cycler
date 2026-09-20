@@ -163,8 +163,7 @@ Each answers a different question, and they are kept separate on purpose.
 When adding an algorithm you will almost always work in **graph → path**. Touch geo → graph only
 when you change `buildGraph`.
 
-> Paths above are relative to `app/domain/routing/`, and change if
-> [26](../backlog/26-separate-tests-from-source.md) lands.
+> Paths above are relative to `app/domain/routing/`.
 
 ### 4.2 The `graph-to-path` DSL
 

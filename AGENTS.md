@@ -30,3 +30,4 @@ documents below; this file only points to them.
 When a task is complete, stage the files that belong to it with `git add <paths>` and propose a
 commit message in the format of development.md §7. Do not run `git commit` — the human reviews
 the staged diff and commits. Leave unrelated changes unstaged.
+When task was formed as markdown document in `backlog/`, move it after completion to a `done/` subdirectory within `backlog/` and update `backlog/README.md` accordingly.
