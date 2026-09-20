@@ -1,4 +1,5 @@
 import { fetchOverpassGeoJSON } from '~/infrastructure/osm/overpass-client'
+import type { OverpassRequestOptions } from '~/infrastructure/osm/overpass-client'
 import { buildBarrierQuery, buildBikeLaneQuery } from '~/infrastructure/osm/queries'
 import { isAreaStale, loadAllAreas, loadArea, saveArea } from '~/infrastructure/cache/area-cache'
 import { geojsonToBikeLanes } from '~/domain/mappers/osm-to-domain'
@@ -23,7 +24,11 @@ function bboxId(bbox: BoundingBox): string {
  * the caller explicitly requests a refresh; missing or expired data is fetched
  * from Overpass and cached for later sessions.
  */
-export async function fetchArea(bbox: BoundingBox, forceRefresh = false): Promise<AreaLoadResult> {
+export async function fetchArea(
+  bbox: BoundingBox,
+  forceRefresh = false,
+  requestOptions: OverpassRequestOptions = {},
+): Promise<AreaLoadResult> {
   const id = bboxId(bbox)
 
   if (!forceRefresh) {
@@ -31,9 +36,9 @@ export async function fetchArea(bbox: BoundingBox, forceRefresh = false): Promis
     if (cached) return { area: normalizeCachedArea(cached), source: 'cache' }
   }
 
-  const geojson = await fetchOverpassGeoJSON(buildBikeLaneQuery(bbox))
+  const geojson = await fetchOverpassGeoJSON(buildBikeLaneQuery(bbox), requestOptions)
   const bikeLanes = geojsonToBikeLanes(geojson)
-  const barriers = await fetchBarriers(bbox)
+  const barriers = await fetchBarriers(bbox, requestOptions)
 
   const area: CachedArea = { id, bbox, bikeLanes, barriers, fetchedAt: new Date() }
   await saveArea(area)
@@ -64,11 +69,21 @@ function normalizeCachedArea(area: CachedArea): CachedArea {
   return { ...area, barriers: area.barriers ?? null }
 }
 
-async function fetchBarriers(bbox: BoundingBox): Promise<BarrierData | null> {
+async function fetchBarriers(
+  bbox: BoundingBox,
+  requestOptions: OverpassRequestOptions,
+): Promise<BarrierData | null> {
   try {
-    return geojsonToBarriers(await fetchOverpassGeoJSON(buildBarrierQuery(bbox)))
+    return geojsonToBarriers(await fetchOverpassGeoJSON(buildBarrierQuery(bbox), requestOptions))
   } catch (err) {
+    if (requestOptions.signal?.aborted || isAbortError(err)) throw err
     console.warn('Barrier data is unavailable — routes here cannot be checked for crossings.', err)
     return null
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
+  )
 }

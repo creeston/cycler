@@ -8,11 +8,14 @@ import { BottomSheet } from './BottomSheet'
 
 const clearStoredAreas = vi.fn()
 const fetchLanes = vi.fn()
+const cancelFetch = vi.fn()
+let bikeLanesAreLoading = false
 
 vi.mock('~/presentation/hooks/useBikeLanes', () => ({
   useBikeLanes: () => ({
     fetch: fetchLanes,
-    isLoading: false,
+    cancelFetch,
+    isLoading: bikeLanesAreLoading,
     lastFetchedAt: new Date(),
     lastLoadSource: 'cache',
     isAreaTooLarge: false,
@@ -27,6 +30,7 @@ vi.mock('~/presentation/hooks/useBikeLanes', () => ({
 beforeEach(() => {
   vi.useFakeTimers()
   vi.clearAllMocks()
+  bikeLanesAreLoading = false
   localStorage.clear()
   useRoutingStore.setState({
     currentRoute: null,
@@ -69,6 +73,17 @@ describe('BottomSheet preferences', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Load Bike Lanes' }))
     expect(fetchLanes).toHaveBeenCalledWith()
+  })
+
+  it('offers a cancel action while bike lanes are loading', () => {
+    bikeLanesAreLoading = true
+    render(<BottomSheet />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart bike lane load' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel bike lane load' }))
+
+    expect(fetchLanes).toHaveBeenCalledWith()
+    expect(cancelFetch).toHaveBeenCalledOnce()
   })
 
   it('shows stored data in Settings and confirms before clearing it', async () => {

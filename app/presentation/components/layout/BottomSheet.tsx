@@ -80,6 +80,7 @@ export function BottomSheet() {
 
   const {
     fetch: fetchLanes,
+    cancelFetch,
     isLoading,
     lastFetchedAt,
     isAreaTooLarge,
@@ -186,7 +187,8 @@ export function BottomSheet() {
             className="flex-1"
             onClick={() => fetchLanes()}
             loading={isLoading}
-            disabled={isLoading || isAreaTooLarge}
+            disabled={isAreaTooLarge}
+            aria-label={isLoading ? 'Restart bike lane load' : undefined}
           >
             <MapPin size={16} />
             Load Bike Lanes
@@ -199,6 +201,16 @@ export function BottomSheet() {
             >
               <RefreshCw size={16} />
               Refresh
+            </Button>
+          )}
+          {isLoading && (
+            <Button
+              variant="ghost"
+              onClick={cancelFetch}
+              className="px-3 text-gray-400 hover:text-gray-700"
+              aria-label="Cancel bike lane load"
+            >
+              <X size={16} />
             </Button>
           )}
         </div>

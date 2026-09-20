@@ -134,11 +134,11 @@ journey
       Import into Komoot or Garmin: 4: Cyclist
 ```
 
-The two low-scoring steps are both waits. The network round-trip to Overpass has no progress
-indication beyond a spinner ([`18`](../backlog/18-overpass-resilience.md)). The route search
-runs in a worker since [`17`](../backlog/done/17-web-worker.md), so the map keeps moving and the
-button fills as start candidates complete; it still takes a few seconds for a city on a slow
-phone.
+The two low-scoring steps are both waits. The network round-trip to Overpass has a spinner, shows
+when a transient failure is being retried, and can be cancelled; it does not expose byte-level
+progress ([`18`](../backlog/done/18-overpass-resilience.md)). The route search runs in a worker
+since [`17`](../backlog/done/17-web-worker.md), so the map keeps moving and the button fills as
+start candidates complete; it still takes a few seconds for a city on a slow phone.
 
 ---
 
@@ -156,16 +156,19 @@ phone.
 3. On a miss, an Overpass QL query is built for the bbox, selecting `highway=cycleway`,
    `cycleway=lane|track|shared_lane|opposite_lane|opposite_track`, `cycleway:left/right=lane|track`,
    and `bicycle=designated` on `path`/`track`/`footway`.
-4. The response is converted to GeoJSON, then to `BikeLane[]`. LineString features only; every
-   other geometry is discarded.
-5. The area is written to IndexedDB under a bbox id rounded to 3 decimals.
-6. The store is updated, the overlay redraws, the route batch cache is cleared.
+4. Transient failures are retried up to three times per endpoint with jittered exponential
+   backoff, honouring `Retry-After`, before moving to an alternate public instance. Only one
+   Overpass query runs at a time, and a request can be cancelled or times out after 60 seconds.
+5. The response must be JSON and no larger than 25 MiB. It is converted to GeoJSON, then to
+   `BikeLane[]`. LineString features only; every other geometry is discarded.
+6. The area is written to IndexedDB under a bbox id rounded to 3 decimals.
+7. The store is updated, the overlay redraws, the route batch cache is cleared.
 
 **Result** The sheet header reports `N lanes · cached … ago` or `N lanes · updated … ago`; the
 network is on the map.
-**Failure** Any network or HTTP error surfaces in the red banner. There is no retry, no
-alternative mirror, and no way to cancel an in-flight request
-([`18`](../backlog/18-overpass-resilience.md)).
+**Failure** Rate limits, timeouts, connection failures, invalid bodies, and oversized responses
+surface actionable messages in the red banner after recovery is exhausted. Cancelling a request
+is silent ([`18`](../backlog/done/18-overpass-resilience.md)).
 
 ---
 

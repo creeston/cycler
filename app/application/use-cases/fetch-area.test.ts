@@ -123,6 +123,33 @@ describe('fetchArea', () => {
     expect(fetched.barriers?.barriers).toHaveLength(1)
     expect(fetched.barriers?.barriers[0].kind).toBe('major_road')
   })
+
+  it('threads cancellation through both Overpass queries', async () => {
+    const controller = new AbortController()
+    mockedFetch.mockResolvedValueOnce(oneCycleway()).mockResolvedValueOnce(oneArterial())
+
+    await fetchArea(bbox, true, { signal: controller.signal })
+
+    expect(mockedFetch).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.objectContaining({ signal: controller.signal }),
+    )
+    expect(mockedFetch).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({ signal: controller.signal }),
+    )
+  })
+
+  it('does not swallow cancellation of the barrier request', async () => {
+    mockedFetch
+      .mockResolvedValueOnce(oneCycleway())
+      .mockRejectedValueOnce(new DOMException('The operation was aborted.', 'AbortError'))
+
+    await expect(fetchArea(bbox, true)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mockedSave).not.toHaveBeenCalled()
+  })
 })
 
 function area(id: string, bounds: BoundingBox, fetchedAt: Date): CachedArea {

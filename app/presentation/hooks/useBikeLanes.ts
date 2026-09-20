@@ -46,6 +46,8 @@ export function useBikeLanes() {
   const [isClearingCache, setIsClearingCache] = useState(false)
   const [lastLoadSource, setLastLoadSource] = useState<AreaLoadSource | null>(null)
   const cacheGeneration = useRef(0)
+  const requestController = useRef<AbortController | null>(null)
+  const requestId = useRef(0)
 
   const refreshCacheStats = useCallback(async () => {
     const stats = await getLaneCacheStats()
@@ -76,6 +78,14 @@ export function useBikeLanes() {
     }
   }, [])
 
+  useEffect(
+    () => () => {
+      requestId.current += 1
+      requestController.current?.abort()
+    },
+    [],
+  )
+
   // Restore the cached areas near the map, and only those. Everything else
   // stays in IndexedDB until the rider moves there.
   useEffect(() => {
@@ -101,30 +111,56 @@ export function useBikeLanes() {
 
   const fetch = useCallback(
     async (forceRefresh = false) => {
-      if (!bbox || isLoading) return
+      if (!bbox) return
+      requestController.current?.abort()
+      const currentRequestId = ++requestId.current
       const { widthKm, heightKm } = bboxDimensionsKm(bbox)
       if (widthKm > MAX_AREA_KM || heightKm > MAX_AREA_KM) {
+        requestController.current = null
+        setLoading(false)
         setFetchError(
           `Zoom in closer — current area is ${Math.round(widthKm)}×${Math.round(heightKm)} km. Maximum is ${MAX_AREA_KM}×${MAX_AREA_KM} km.`,
         )
         return
       }
+      const controller = new AbortController()
+      requestController.current = controller
       setLoading(true)
       setFetchError(null)
       try {
-        const result = await fetchArea(bbox, forceRefresh)
+        const result = await fetchArea(bbox, forceRefresh, {
+          signal: controller.signal,
+          onRetry: message => {
+            if (requestId.current === currentRequestId) setFetchError(message)
+          },
+        })
+        if (requestId.current !== currentRequestId) return
         mergeAreas([result.area])
         setLastLoadSource(result.source)
+        setFetchError(null)
         clearRouteCache()
         await refreshCacheStats()
       } catch (err) {
-        setFetchError(err instanceof Error ? err.message : 'Failed to fetch bike lanes')
+        if (requestId.current === currentRequestId && !isAbortError(err)) {
+          setFetchError(err instanceof Error ? err.message : 'Failed to fetch bike lanes')
+        }
       } finally {
-        setLoading(false)
+        if (requestId.current === currentRequestId) {
+          requestController.current = null
+          setLoading(false)
+        }
       }
     },
-    [bbox, isLoading, setLoading, mergeAreas, setFetchError, refreshCacheStats],
+    [bbox, setLoading, mergeAreas, setFetchError, refreshCacheStats],
   )
+
+  const cancelFetch = useCallback(() => {
+    requestId.current += 1
+    requestController.current?.abort()
+    requestController.current = null
+    setLoading(false)
+    setFetchError(null)
+  }, [setFetchError, setLoading])
 
   const clearStoredAreas = useCallback(async () => {
     setIsClearingCache(true)
@@ -146,6 +182,7 @@ export function useBikeLanes() {
 
   return {
     fetch,
+    cancelFetch,
     bikeLanes,
     isLoading,
     lastFetchedAt,
@@ -157,4 +194,10 @@ export function useBikeLanes() {
     isClearingCache,
     clearStoredAreas,
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
+  )
 }

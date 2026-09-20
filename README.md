@@ -148,7 +148,7 @@ Both are free, unauthenticated and rate-limited. Treat them as donated infrastru
 
 | Service | Used for | Constraint |
 |---|---|---|
-| [Overpass API](https://overpass-api.de) | Bike lane data | Volunteer-run; 429/504 are common under load. Requests are capped at a 50×50 km bbox. See [task 18](backlog/18-overpass-resilience.md). |
+| [Overpass API](https://overpass-api.de) | Bike lane data | Volunteer-run; requests are serialised, retried with mirror fallback, and capped at a 50×50 km bbox. See [task 18](backlog/done/18-overpass-resilience.md). |
 | [OpenFreeMap](https://openfreemap.org) | Positron base tiles | No key, no usage limit stated |
 
 ### Cached data

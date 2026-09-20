@@ -52,8 +52,9 @@ graph LR
 and build tool. The production bundle is a static site served under the `/cycler/` base path
 (GitHub Pages, or the bundled nginx image).
 
-Both external services are free, unauthenticated and rate-limited — see
-[`18-overpass-resilience`](../backlog/18-overpass-resilience.md).
+Both external services are free, unauthenticated and rate-limited. Overpass requests are
+serialised and use bounded retries plus mirror fallback — see
+[`18-overpass-resilience`](../backlog/done/18-overpass-resilience.md).
 
 ---
 
@@ -120,9 +121,11 @@ explicit network-only path.
    that fully contains the request. Entries expire after seven days. A hit returns without a
    network call; **Refresh** skips both lookups.
 4. On a miss, `fetchArea` builds an Overpass QL query via `buildBikeLaneQuery` and posts it through
-   `overpass-client`. The OSM JSON response is converted by `osmtogeojson`, then by
-   `geojsonToBikeLanes` into
-   `BikeLane[]` — LineString features only, everything else discarded.
+   `overpass-client`. Requests are serialised, time out after 60 seconds, retry transient failures
+   three times with backoff, and move through an ordered mirror list. The client honours
+   `Retry-After`, rejects oversized or non-JSON responses, and exposes cancellation through an
+   `AbortSignal`. The OSM JSON response is converted by `osmtogeojson`, then by
+   `geojsonToBikeLanes` into `BikeLane[]` — LineString features only, everything else discarded.
 5. A **second** query, `buildBarrierQuery`, fetches the major roads, railways, water and
    crossings for the same box, which `geojsonToBarriers` splits into `BarrierData`. This call is
    allowed to fail on its own: lanes are the product, and a failure yields `barriers: null`,
@@ -338,5 +341,4 @@ Each is a task in [`/backlog`](../backlog/README.md).
 | Gap edges are unweighted; tolerance is silently widened | The core bike-lane-first guarantee is not enforced | [01](../backlog/done/01-gap-penalty-and-tolerance.md) |
 | Graph nodes exist only where lanes **share a vertex** | Lanes that cross without a shared OSM node are not connected | follow-up of [09](../backlog/done/09-mid-lane-junctions.md) |
 | Distance preferences have no UI | Distance configuration is unreachable | [05](../backlog/05-route-preferences-ui.md) |
-| Overpass has one endpoint, no retry, no abort | A 429 or 504 surfaces as a raw error and loses the request | [18](../backlog/18-overpass-resilience.md) |
 | No tests above the domain layer | Use cases, stores, hooks and infrastructure are unverified | [22](../backlog/22-use-case-tests.md) |

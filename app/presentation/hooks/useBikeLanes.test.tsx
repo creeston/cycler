@@ -118,7 +118,11 @@ describe('useBikeLanes area loading', () => {
       await hook!.fetch()
     })
 
-    expect(mockedFetch).toHaveBeenCalledWith(WARSAW, false)
+    expect(mockedFetch).toHaveBeenCalledWith(
+      WARSAW,
+      false,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     expect(hook!.lastLoadSource).toBe('cache')
     expect(useMapStore.getState().areas.map(a => a.id)).toEqual(['cached'])
   })
@@ -139,8 +143,88 @@ describe('useBikeLanes area loading', () => {
       await hook!.fetch(true)
     })
 
-    expect(mockedFetch).toHaveBeenCalledWith(WARSAW, true)
+    expect(mockedFetch).toHaveBeenCalledWith(
+      WARSAW,
+      true,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     expect(hook!.lastLoadSource).toBe('network')
+  })
+
+  it('aborts an earlier load and only applies the latest result', async () => {
+    let resolveFirst: ((result: Awaited<ReturnType<typeof fetchArea>>) => void) | undefined
+    mockedFetch
+      .mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce({ area: area('latest', WARSAW), source: 'network' })
+    useMapStore.setState({ bbox: WARSAW })
+
+    let hook: ReturnType<typeof useBikeLanes> | undefined
+    function Capture() {
+      hook = useBikeLanes()
+      return null
+    }
+    await act(async () => {
+      render(<Capture />)
+    })
+
+    let firstLoad: Promise<void>
+    await act(async () => {
+      firstLoad = hook!.fetch()
+      await Promise.resolve()
+    })
+    const firstSignal = mockedFetch.mock.calls[0][2]?.signal
+
+    await act(async () => {
+      await hook!.fetch(true)
+    })
+    expect(firstSignal?.aborted).toBe(true)
+    expect(useMapStore.getState().areas.map(a => a.id)).toEqual(['latest'])
+
+    await act(async () => {
+      resolveFirst!({ area: area('stale', WARSAW), source: 'network' })
+      await firstLoad!
+    })
+    expect(useMapStore.getState().areas.map(a => a.id)).toEqual(['latest'])
+  })
+
+  it('cancels an in-flight load without showing an error', async () => {
+    mockedFetch.mockImplementationOnce((_bbox, _forceRefresh, options) => {
+      return new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('The operation was aborted.', 'AbortError')),
+          { once: true },
+        )
+      })
+    })
+    useMapStore.setState({ bbox: WARSAW })
+
+    let hook: ReturnType<typeof useBikeLanes> | undefined
+    function Capture() {
+      hook = useBikeLanes()
+      return null
+    }
+    await act(async () => {
+      render(<Capture />)
+    })
+
+    let load: Promise<void>
+    await act(async () => {
+      load = hook!.fetch()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      hook!.cancelFetch()
+      await load!
+    })
+
+    expect(useMapStore.getState().isLoading).toBe(false)
+    expect(useMapStore.getState().fetchError).toBeNull()
   })
 })
 
