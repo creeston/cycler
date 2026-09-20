@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchArea } from '~/application/use-cases/fetch-area'
+import type { AreaLoadSource } from '~/application/use-cases/fetch-area'
 import { clearRouteCache } from '~/application/use-cases/build-route'
 import { clearCachedData } from '~/application/use-cases/clear-cached-data'
 import {
-  getAreaCacheStats,
-  listAreaBounds,
-  loadArea,
-  pruneStaleAreas,
-} from '~/infrastructure/cache/area-cache'
+  getLaneCacheStats,
+  initializeLaneCache,
+  loadCachedLanes,
+} from '~/application/use-cases/load-cached-lanes'
 import { useMapStore } from '~/application/stores/map-store'
-import { bboxesIntersect, expandBbox } from '~/domain/entities/area'
-import type { BoundingBox, CachedArea } from '~/domain/entities/area'
+import { expandBbox } from '~/domain/entities/area'
+import type { BoundingBox } from '~/domain/entities/area'
 
-const STALE_MS = 7 * 24 * 60 * 60 * 1000
 const MAX_AREA_KM = 50
 
 /**
@@ -22,10 +21,6 @@ const MAX_AREA_KM = 50
  * evict what it is about to need again.
  */
 const LOAD_MARGIN = 1
-
-function isStale(area: CachedArea): boolean {
-  return Date.now() - new Date(area.fetchedAt).getTime() >= STALE_MS
-}
 
 function bboxDimensionsKm(bbox: BoundingBox) {
   const R = 6_371
@@ -49,10 +44,11 @@ export function useBikeLanes() {
   const [storedAreaCount, setStoredAreaCount] = useState(0)
   const [newestStoredAt, setNewestStoredAt] = useState<Date | null>(null)
   const [isClearingCache, setIsClearingCache] = useState(false)
+  const [lastLoadSource, setLastLoadSource] = useState<AreaLoadSource | null>(null)
   const cacheGeneration = useRef(0)
 
   const refreshCacheStats = useCallback(async () => {
-    const stats = await getAreaCacheStats()
+    const stats = await getLaneCacheStats()
     setStoredAreaCount(stats.count)
     setNewestStoredAt(stats.newestFetchedAt)
   }, [])
@@ -67,17 +63,18 @@ export function useBikeLanes() {
     let cancelled = false
 
     async function prepareCache(): Promise<void> {
-      await pruneStaleAreas()
+      const stats = await initializeLaneCache()
       if (cancelled) return
-      await refreshCacheStats()
-      if (!cancelled) setCacheReady(true)
+      setStoredAreaCount(stats.count)
+      setNewestStoredAt(stats.newestFetchedAt)
+      setCacheReady(true)
     }
 
     void prepareCache()
     return () => {
       cancelled = true
     }
-  }, [refreshCacheStats])
+  }, [])
 
   // Restore the cached areas near the map, and only those. Everything else
   // stays in IndexedDB until the rider moves there.
@@ -87,17 +84,13 @@ export function useBikeLanes() {
     const generation = cacheGeneration.current
     let cancelled = false
 
-    listAreaBounds().then(async bounds => {
-      const wanted = bounds.filter(entry => bboxesIntersect(entry.bbox, view))
-      const missing = wanted.filter(entry => !heldIds.current.has(entry.id))
-      const loaded = await Promise.all(missing.map(entry => loadArea(entry.id)))
+    loadCachedLanes(view, heldIds.current).then(loaded => {
       if (cancelled || generation !== cacheGeneration.current) return
 
-      const fresh = loaded
-        .filter((area): area is CachedArea => area !== undefined && !isStale(area))
-        .map(area => ({ ...area, barriers: area.barriers ?? null }))
-
-      if (fresh.length > 0) mergeAreas(fresh)
+      if (loaded.length > 0) {
+        mergeAreas(loaded)
+        setLastLoadSource('cache')
+      }
       keepAreasIntersecting(view)
     })
 
@@ -106,27 +99,32 @@ export function useBikeLanes() {
     }
   }, [bbox, cacheReady, mergeAreas, keepAreasIntersecting])
 
-  const fetch = useCallback(async () => {
-    if (!bbox || isLoading) return
-    const { widthKm, heightKm } = bboxDimensionsKm(bbox)
-    if (widthKm > MAX_AREA_KM || heightKm > MAX_AREA_KM) {
-      setFetchError(
-        `Zoom in closer — current area is ${Math.round(widthKm)}×${Math.round(heightKm)} km. Maximum is ${MAX_AREA_KM}×${MAX_AREA_KM} km.`,
-      )
-      return
-    }
-    setLoading(true)
-    setFetchError(null)
-    try {
-      mergeAreas([await fetchArea(bbox, true)])
-      clearRouteCache()
-      await refreshCacheStats()
-    } catch (err) {
-      setFetchError(err instanceof Error ? err.message : 'Failed to fetch bike lanes')
-    } finally {
-      setLoading(false)
-    }
-  }, [bbox, isLoading, setLoading, mergeAreas, setFetchError, refreshCacheStats])
+  const fetch = useCallback(
+    async (forceRefresh = false) => {
+      if (!bbox || isLoading) return
+      const { widthKm, heightKm } = bboxDimensionsKm(bbox)
+      if (widthKm > MAX_AREA_KM || heightKm > MAX_AREA_KM) {
+        setFetchError(
+          `Zoom in closer — current area is ${Math.round(widthKm)}×${Math.round(heightKm)} km. Maximum is ${MAX_AREA_KM}×${MAX_AREA_KM} km.`,
+        )
+        return
+      }
+      setLoading(true)
+      setFetchError(null)
+      try {
+        const result = await fetchArea(bbox, forceRefresh)
+        mergeAreas([result.area])
+        setLastLoadSource(result.source)
+        clearRouteCache()
+        await refreshCacheStats()
+      } catch (err) {
+        setFetchError(err instanceof Error ? err.message : 'Failed to fetch bike lanes')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [bbox, isLoading, setLoading, mergeAreas, setFetchError, refreshCacheStats],
+  )
 
   const clearStoredAreas = useCallback(async () => {
     setIsClearingCache(true)
@@ -155,6 +153,7 @@ export function useBikeLanes() {
     cacheReady,
     storedAreaCount,
     newestStoredAt,
+    lastLoadSource,
     isClearingCache,
     clearStoredAreas,
   }

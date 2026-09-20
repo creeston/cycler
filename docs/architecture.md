@@ -88,22 +88,15 @@ graph TD
 |---|---|---|
 | `domain` | `entities/` (BikeLane, Barrier, Route, RoutePreferences, CachedArea) · `routing/` (graph, spatial-index, route-finder, search, random, algorithms, barriers) · `mappers/` (osm-to-domain, osm-to-barriers, geojson-from-domain) | nothing in-app; only `geojson` types, `graphology`, `@turf/turf` |
 | `infrastructure` | `osm/` (overpass-client, queries) · `cache/` (db, area-cache) · `export/` (gpx) | `domain/entities` |
-| `application` | `use-cases/` (fetchArea, buildRoute) · `stores/` (map-store, routing-store) | `domain`, `infrastructure` |
+| `application` | `use-cases/` (fetchArea, loadCachedLanes, buildRoute) · `stores/` (map-store, routing-store) | `domain`, `infrastructure` |
 | `presentation` | `components/map` · `components/layout` · `components/ui` · `hooks/` | `application`, plus domain types and view mappers |
 
-### Deliberate shortcuts
-
-Two places where the layering is thinner than the diagram suggests. Both are intentional; the
-second is worth revisiting.
+### Deliberate shortcut
 
 - **`presentation` reaches into `domain` and `infrastructure` for pure formatting.**
   `BikeLaneLayer` and `RouteLayer` import `domain/mappers/geojson-from-domain`, and `BottomSheet`
   imports `infrastructure/export/gpx`. Both are pure functions with no orchestration, so routing
   them through a use case would buy nothing.
-- **`useBikeLanes` bypasses the application layer.** It calls `loadAllAreas()` from
-  infrastructure directly on mount, and calls `clearRouteCache()` from the *route* use case —
-  coupling two use cases through a hook. See
-  [`19-cache-bypassed-on-fetch`](../backlog/19-cache-bypassed-on-fetch.md).
 
 ### Why not full hexagonal architecture
 
@@ -118,14 +111,17 @@ being testable in isolation, not because the I/O might change.
 
 ### 3.1 Loading bike lanes
 
-Triggered by **Load Bike Lanes**. Always hits the network — the IndexedDB cache is only consulted
-on app start.
+Triggered by **Load Bike Lanes**. A fresh cached area is returned immediately; **Refresh** is the
+explicit network-only path.
 
 1. `useBikeLanes` reads the current `bbox` from `map-store` (written by `CycleMap` on every move).
 2. `bboxDimensionsKm` rejects anything larger than 50 × 50 km with a "zoom in closer" message.
-3. `fetchArea(bbox, forceRefresh = true)` builds an Overpass QL query via `buildBikeLaneQuery`
-   and posts it through `overpass-client`.
-4. The OSM JSON response is converted by `osmtogeojson`, then by `geojsonToBikeLanes` into
+3. `fetchArea(bbox)` first looks for the exact cache key, then for the smallest fresh cached bbox
+   that fully contains the request. Entries expire after seven days. A hit returns without a
+   network call; **Refresh** skips both lookups.
+4. On a miss, `fetchArea` builds an Overpass QL query via `buildBikeLaneQuery` and posts it through
+   `overpass-client`. The OSM JSON response is converted by `osmtogeojson`, then by
+   `geojsonToBikeLanes` into
    `BikeLane[]` — LineString features only, everything else discarded.
 5. A **second** query, `buildBarrierQuery`, fetches the major roads, railways, water and
    crossings for the same box, which `geojsonToBarriers` splits into `BarrierData`. This call is
@@ -134,8 +130,9 @@ on app start.
 6. The area — lanes and barriers together — is written to IndexedDB keyed by a bbox id rounded to
    3 decimals. A browser that refuses the database, or a write that fails, is logged and
    ignored — see §4.1.
-7. `mergeAreas` adds the area to the ones already held, the overlay redraws, and
-   `clearRouteCache()` discards stale route batches.
+7. `mergeAreas` adds the area to the ones already held, the overlay redraws,
+   `clearRouteCache()` discards stale route batches, and the header identifies cached versus
+   refreshed data.
 
 ### 3.1.1 What is held, and what is drawn
 
@@ -159,9 +156,9 @@ of the data rather than of the search.
 
 ### 3.1.2 The mount path
 
-Rather than reading everything, the effect lists the cached areas **by key** (`listAreaBounds`,
-which parses the box out of the id and deserialises nothing), keeps those intersecting the load
-bound, drops entries older than 7 days, and merges the rest — so a returning user sees the lanes
+`initializeLaneCache` deletes entries older than seven days. Then `loadCachedLanes` lists cached
+areas **by key** (`listAreaBounds`, which parses the box out of the id and deserialises nothing),
+keeps those intersecting the load bound, and merges the rest — so a returning user sees the lanes
 around them with no network call, and the cities they are not looking at cost nothing.
 
 ### 3.2 Suggesting a route
@@ -200,7 +197,7 @@ their state to `localStorage`.
 |---|---|---|---|
 | `viewport` | localStorage (`cycle-map-viewport`) | yes | Restores the last map position |
 | `bbox`, `isLoading`, `fetchError`, `lastFetchedAt` | memory | no | Excluded from `partialize` |
-| `areas` | IndexedDB (`cycle-app` → `areas`) | yes, those near the view | Areas older than 7 days are filtered out but never deleted |
+| `areas` | IndexedDB (`cycle-app` → `areas`) | yes, those near the view | Areas older than 7 days are deleted on startup and re-fetched on access |
 | `bikeLanes` | derived from `areas` | — | Recomputed once per area change, not per read |
 | `barriers` | derived from `areas` | — | Null unless **every** held area has them, so a partly unchecked set is never reported as checked |
 | `currentRoute` | localStorage (`cycle-routing`) | yes, but degraded | `createdAt` rehydrates as a `string`, not a `Date` — [`15`](../backlog/15-persisted-route-rehydration.md) |
@@ -328,5 +325,4 @@ Each is a task in [`/backlog`](../backlog/README.md).
 | The graph is built synchronously on the main thread | A 10 000-node city costs ~70 ms per Suggest Route, ~350 ms on the 1 000 m fallback, with the map frozen meanwhile | [17](../backlog/17-web-worker.md) |
 | Distance preferences have no UI | Distance configuration is unreachable | [05](../backlog/05-route-preferences-ui.md) |
 | Overpass has one endpoint, no retry, no abort | A 429 or 504 surfaces as a raw error and loses the request | [18](../backlog/18-overpass-resilience.md) |
-| IndexedDB cache is bypassed on every fetch | Every button press re-queries Overpass | [19](../backlog/19-cache-bypassed-on-fetch.md) |
 | No tests above the domain layer | Use cases, stores, hooks and infrastructure are unverified | [22](../backlog/22-use-case-tests.md) |

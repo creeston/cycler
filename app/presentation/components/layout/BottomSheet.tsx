@@ -58,6 +58,23 @@ function newestCacheLabel(newest: Date | null): string {
   return `Newest stored ${elapsedDays} ${elapsedDays === 1 ? 'day' : 'days'} ago`
 }
 
+function laneDataLabel(
+  laneCount: number,
+  fetchedAt: Date,
+  source: 'cache' | 'network' | null,
+): string {
+  const elapsedMs = Math.max(0, Date.now() - fetchedAt.getTime())
+  const elapsedHours = Math.floor(elapsedMs / (60 * 60 * 1000))
+  const age =
+    elapsedHours === 0
+      ? 'less than an hour ago'
+      : elapsedHours < 24
+        ? `${elapsedHours} ${elapsedHours === 1 ? 'hour' : 'hours'} ago`
+        : `${Math.floor(elapsedHours / 24)} ${Math.floor(elapsedHours / 24) === 1 ? 'day' : 'days'} ago`
+  const provenance = source === 'network' ? 'updated' : 'cached'
+  return `${laneCount} ${laneCount === 1 ? 'lane' : 'lanes'} · ${provenance} ${age}`
+}
+
 export function BottomSheet() {
   const [expanded, setExpanded] = useState(true)
 
@@ -69,6 +86,7 @@ export function BottomSheet() {
     cacheReady,
     storedAreaCount,
     newestStoredAt,
+    lastLoadSource,
     isClearingCache,
     clearStoredAreas,
   } = useBikeLanes()
@@ -155,19 +173,33 @@ export function BottomSheet() {
         <div className="flex items-center justify-between">
           <h1 className="text-base font-bold tracking-tight text-gray-900">CycleRoute</h1>
           {lastFetchedAt && (
-            <span className="text-xs text-gray-400">{bikeLaneCount} lanes loaded</span>
+            <span className="text-xs text-gray-400">
+              {laneDataLabel(bikeLaneCount, lastFetchedAt, lastLoadSource)}
+            </span>
           )}
         </div>
 
-        <Button
-          className="w-full"
-          onClick={() => fetchLanes()}
-          loading={isLoading}
-          disabled={isLoading || isAreaTooLarge}
-        >
-          <MapPin size={16} />
-          Load Bike Lanes
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            className="flex-1"
+            onClick={() => fetchLanes()}
+            loading={isLoading}
+            disabled={isLoading || isAreaTooLarge}
+          >
+            <MapPin size={16} />
+            Load Bike Lanes
+          </Button>
+          {bikeLaneCount > 0 && (
+            <Button
+              variant="ghost"
+              onClick={() => fetchLanes(true)}
+              disabled={isLoading || isAreaTooLarge}
+            >
+              <RefreshCw size={16} />
+              Refresh
+            </Button>
+          )}
+        </div>
         {isAreaTooLarge && (
           <p className="text-center text-xs text-gray-400">Zoom in — area exceeds 50×50 km</p>
         )}

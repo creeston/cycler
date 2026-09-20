@@ -969,4 +969,4 @@ Every tuning constant in the routing path, in one place.
 | `minDistanceMeters` | 10 000 m | `DEFAULT_PREFERENCES` | Target range floor |
 | `maxDistanceMeters` | 30 000 m | `DEFAULT_PREFERENCES` | Target range ceiling |
 | `MAX_AREA_KM` | 50 | `useBikeLanes.ts` | Largest fetchable bbox edge |
-| `STALE_AFTER_MS` | 7 days | `area-cache.ts` + `useBikeLanes.ts` | Cache expiry (duplicated constant) |
+| `AREA_CACHE_STALE_AFTER_MS` | 7 days | `area-cache.ts` | Cache expiry |

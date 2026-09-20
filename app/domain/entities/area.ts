@@ -27,6 +27,16 @@ export function bboxesIntersect(a: BoundingBox, b: BoundingBox): boolean {
   return a.west <= b.east && a.east >= b.west && a.south <= b.north && a.north >= b.south
 }
 
+/** True when every point in `inner` falls within `outer`. Touching edges count. */
+export function bboxContains(outer: BoundingBox, inner: BoundingBox): boolean {
+  return (
+    outer.west <= inner.west &&
+    outer.east >= inner.east &&
+    outer.south <= inner.south &&
+    outer.north >= inner.north
+  )
+}
+
 /**
  * Grows a box by a fraction of its own span on every side. A margin of 0.25
  * turns one screen into one and a half in each direction.

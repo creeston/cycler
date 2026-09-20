@@ -1,17 +1,20 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useRoutingStore } from '~/application/stores/routing-store'
+import { useMapStore } from '~/application/stores/map-store'
 import { DEFAULT_PREFERENCES } from '~/domain/entities/route'
 import type { Route, RoutePreferences } from '~/domain/entities/route'
 import { BottomSheet } from './BottomSheet'
 
 const clearStoredAreas = vi.fn()
+const fetchLanes = vi.fn()
 
 vi.mock('~/presentation/hooks/useBikeLanes', () => ({
   useBikeLanes: () => ({
-    fetch: vi.fn(),
+    fetch: fetchLanes,
     isLoading: false,
-    lastFetchedAt: null,
+    lastFetchedAt: new Date(),
+    lastLoadSource: 'cache',
     isAreaTooLarge: false,
     cacheReady: true,
     storedAreaCount: 2,
@@ -31,6 +34,7 @@ beforeEach(() => {
     preferences: { ...DEFAULT_PREFERENCES },
     routeError: null,
   })
+  useMapStore.setState({ areas: [], bikeLanes: [], barriers: null, lastFetchedAt: null })
 })
 
 afterEach(() => {
@@ -39,6 +43,34 @@ afterEach(() => {
 })
 
 describe('BottomSheet preferences', () => {
+  it('shows cache provenance and provides a separate forced refresh', () => {
+    useMapStore.setState({
+      bikeLanes: [
+        {
+          id: 'lane',
+          osmId: 'way/1',
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [21, 52],
+              [21.1, 52.1],
+            ],
+          },
+          laneType: 'cycleway',
+          tags: {},
+        },
+      ],
+    })
+    render(<BottomSheet />)
+
+    expect(screen.getByText(/1 lane · cached less than an hour ago/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    expect(fetchLanes).toHaveBeenCalledWith(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load Bike Lanes' }))
+    expect(fetchLanes).toHaveBeenCalledWith()
+  })
+
   it('shows stored data in Settings and confirms before clearing it', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<BottomSheet />)

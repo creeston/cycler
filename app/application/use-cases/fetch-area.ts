@@ -1,32 +1,34 @@
 import { fetchOverpassGeoJSON } from '~/infrastructure/osm/overpass-client'
 import { buildBarrierQuery, buildBikeLaneQuery } from '~/infrastructure/osm/queries'
-import { saveArea, loadArea } from '~/infrastructure/cache/area-cache'
+import { isAreaStale, loadAllAreas, loadArea, saveArea } from '~/infrastructure/cache/area-cache'
 import { geojsonToBikeLanes } from '~/domain/mappers/osm-to-domain'
 import { geojsonToBarriers } from '~/domain/mappers/osm-to-barriers'
+import { bboxContains } from '~/domain/entities/area'
 import type { BoundingBox, CachedArea } from '~/domain/entities/area'
 import type { BarrierData } from '~/domain/entities/barrier'
+
+export type AreaLoadSource = 'cache' | 'network'
+
+export interface AreaLoadResult {
+  area: CachedArea
+  source: AreaLoadSource
+}
 
 function bboxId(bbox: BoundingBox): string {
   return `${bbox.west.toFixed(3)},${bbox.south.toFixed(3)},${bbox.east.toFixed(3)},${bbox.north.toFixed(3)}`
 }
 
 /**
- * Fetches the bike lanes for a box and, in a second query, the barriers that
- * decide which gaps between them are plausible.
- *
- * The barrier query is allowed to fail on its own: lanes are the product, and
- * a route without barrier data is still a route — it is reported as unchecked
- * rather than withheld.
- *
- * Returns the whole `CachedArea`, id and box included, so the caller can hold
- * it alongside the other loaded areas and know which part of the map it covers.
+ * Loads the bike lanes and barriers for a box. Fresh cache entries win unless
+ * the caller explicitly requests a refresh; missing or expired data is fetched
+ * from Overpass and cached for later sessions.
  */
-export async function fetchArea(bbox: BoundingBox, forceRefresh = false): Promise<CachedArea> {
+export async function fetchArea(bbox: BoundingBox, forceRefresh = false): Promise<AreaLoadResult> {
   const id = bboxId(bbox)
 
   if (!forceRefresh) {
-    const cached = await loadArea(id)
-    if (cached) return { ...cached, barriers: cached.barriers ?? null }
+    const cached = await findFreshCachedArea(id, bbox)
+    if (cached) return { area: normalizeCachedArea(cached), source: 'cache' }
   }
 
   const geojson = await fetchOverpassGeoJSON(buildBikeLaneQuery(bbox))
@@ -36,7 +38,30 @@ export async function fetchArea(bbox: BoundingBox, forceRefresh = false): Promis
   const area: CachedArea = { id, bbox, bikeLanes, barriers, fetchedAt: new Date() }
   await saveArea(area)
 
-  return area
+  return { area, source: 'network' }
+}
+
+async function findFreshCachedArea(
+  id: string,
+  requestedBbox: BoundingBox,
+): Promise<CachedArea | undefined> {
+  const exact = await loadArea(id)
+  if (exact && !isAreaStale(exact)) return exact
+
+  const containing = (await loadAllAreas())
+    .filter(area => area.id !== exact?.id)
+    .filter(area => !isAreaStale(area) && bboxContains(area.bbox, requestedBbox))
+    .sort((a, b) => bboxArea(a.bbox) - bboxArea(b.bbox))
+
+  return containing[0]
+}
+
+function bboxArea(bbox: BoundingBox): number {
+  return (bbox.east - bbox.west) * (bbox.north - bbox.south)
+}
+
+function normalizeCachedArea(area: CachedArea): CachedArea {
+  return { ...area, barriers: area.barriers ?? null }
 }
 
 async function fetchBarriers(bbox: BoundingBox): Promise<BarrierData | null> {

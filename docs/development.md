@@ -57,16 +57,11 @@ points back outward.
   state. No business rules that belong in the domain.
 - **presentation** — rendering and user input. Components read stores and dispatch use cases.
 
-### Two existing shortcuts, and whether to copy them
+### Existing shortcut, and whether to copy it
 
 `presentation` imports `domain/mappers/geojson-from-domain` and `infrastructure/export/gpx`
 directly. **Copy this** for pure formatting functions — wrapping a one-line serialiser in a use
-case buys nothing.
-
-`useBikeLanes` calls `loadAllAreas()` from infrastructure and `clearRouteCache()` from another
-use case. **Do not copy this** — it is tracked as
-[19](../backlog/19-cache-bypassed-on-fetch.md). Hooks call use cases; use cases call
-infrastructure.
+case buys nothing. Stateful infrastructure access still goes through application use cases.
 
 ### Adding a dependency
 

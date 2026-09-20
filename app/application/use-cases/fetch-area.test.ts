@@ -1,20 +1,32 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FeatureCollection } from 'geojson'
 import { fetchArea } from './fetch-area'
 import { fetchOverpassGeoJSON } from '~/infrastructure/osm/overpass-client'
-import { tryGetDb } from '~/infrastructure/cache/db'
+import { loadAllAreas, loadArea, saveArea } from '~/infrastructure/cache/area-cache'
+import type { BoundingBox, CachedArea } from '~/domain/entities/area'
 
 vi.mock('~/infrastructure/osm/overpass-client', () => ({ fetchOverpassGeoJSON: vi.fn() }))
-vi.mock('~/infrastructure/cache/db', () => ({ tryGetDb: vi.fn() }))
+vi.mock('~/infrastructure/cache/area-cache', () => ({
+  isAreaStale: (area: CachedArea) =>
+    Date.now() - new Date(area.fetchedAt).getTime() >= 7 * 24 * 60 * 60 * 1000,
+  loadAllAreas: vi.fn(),
+  loadArea: vi.fn(),
+  saveArea: vi.fn(),
+}))
 
 const mockedFetch = vi.mocked(fetchOverpassGeoJSON)
-const mockedTryGetDb = vi.mocked(tryGetDb)
+const mockedLoadAll = vi.mocked(loadAllAreas)
+const mockedLoad = vi.mocked(loadArea)
+const mockedSave = vi.mocked(saveArea)
 
-const bbox = { west: 20.9, south: 52.2, east: 21.0, north: 52.3 }
+const bbox: BoundingBox = { west: 20.9, south: 52.2, east: 21.0, north: 52.3 }
 
 describe('fetchArea', () => {
   beforeEach(() => {
     mockedFetch.mockResolvedValue(oneCycleway())
+    mockedLoad.mockResolvedValue(undefined)
+    mockedLoadAll.mockResolvedValue([])
+    mockedSave.mockResolvedValue(true)
     vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
 
@@ -22,62 +34,103 @@ describe('fetchArea', () => {
     vi.restoreAllMocks()
   })
 
-  it('returns the fetched lanes when the browser refuses the cache database', async () => {
-    mockedTryGetDb.mockResolvedValue(null)
+  it('serves a fresh cached area without calling Overpass', async () => {
+    mockedLoad.mockResolvedValue(area('exact', bbox, new Date()))
 
-    const { bikeLanes } = await fetchArea(bbox)
+    const result = await fetchArea(bbox)
 
-    expect(bikeLanes).toHaveLength(1)
-    expect(bikeLanes[0].laneType).toBe('cycleway')
+    expect(result.source).toBe('cache')
+    expect(result.area.bikeLanes).toEqual([])
+    expect(
+      result.area.barriers,
+      'an area cached before barrier checking reads as unchecked',
+    ).toBeNull()
+    expect(mockedFetch).not.toHaveBeenCalled()
+    expect(mockedSave).not.toHaveBeenCalled()
   })
 
-  it('returns the fetched lanes when caching them fails', async () => {
-    mockedTryGetDb.mockResolvedValue(deniedDb())
+  it('re-fetches and overwrites a stale cached area', async () => {
+    mockedLoad.mockResolvedValue(area('stale', bbox, daysAgo(8)))
 
-    const { bikeLanes } = await fetchArea(bbox, true)
+    const result = await fetchArea(bbox)
 
-    expect(bikeLanes).toHaveLength(1)
+    expect(result.source).toBe('network')
+    expect(mockedFetch).toHaveBeenCalledTimes(2)
+    expect(mockedSave).toHaveBeenCalledOnce()
+    expect(mockedSave.mock.calls[0][0].bikeLanes).toHaveLength(1)
   })
 
-  it('serves a cached area without calling Overpass', async () => {
-    mockedTryGetDb.mockResolvedValue({
-      get: () => Promise.resolve({ id: 'x', bbox, bikeLanes: [], fetchedAt: new Date() }),
-    } as unknown as Awaited<ReturnType<typeof tryGetDb>>)
+  it('fetches and saves an area on a cache miss', async () => {
+    const result = await fetchArea(bbox)
 
-    const { bikeLanes, barriers } = await fetchArea(bbox)
+    expect(result.source).toBe('network')
+    expect(result.area.bikeLanes).toHaveLength(1)
+    expect(mockedFetch).toHaveBeenCalledTimes(2)
+    expect(mockedSave).toHaveBeenCalledOnce()
+  })
 
-    expect(bikeLanes).toEqual([])
-    expect(barriers, 'an area cached before barrier checking reads as unchecked').toBeNull()
+  it('forces a network refresh even when a fresh area is cached', async () => {
+    mockedLoad.mockResolvedValue(area('exact', bbox, new Date()))
+
+    const result = await fetchArea(bbox, true)
+
+    expect(result.source).toBe('network')
+    expect(mockedLoad).not.toHaveBeenCalled()
+    expect(mockedLoadAll).not.toHaveBeenCalled()
+    expect(mockedFetch).toHaveBeenCalledTimes(2)
+    expect(mockedSave).toHaveBeenCalledOnce()
+  })
+
+  it('reuses the smallest fresh cached area that contains the requested box', async () => {
+    const large: BoundingBox = { west: 20.7, south: 52.0, east: 21.2, north: 52.5 }
+    const close: BoundingBox = { west: 20.8, south: 52.1, east: 21.1, north: 52.4 }
+    mockedLoadAll.mockResolvedValue([
+      area('large', large, new Date()),
+      area('close', close, new Date()),
+    ])
+
+    const result = await fetchArea(bbox)
+
+    expect(result.source).toBe('cache')
+    expect(result.area.id).toBe('close')
     expect(mockedFetch).not.toHaveBeenCalled()
   })
 
+  it('ignores a stale containing area', async () => {
+    const containing: BoundingBox = { west: 20.8, south: 52.1, east: 21.1, north: 52.4 }
+    mockedLoadAll.mockResolvedValue([area('stale-containing', containing, daysAgo(8))])
+
+    const result = await fetchArea(bbox)
+
+    expect(result.source).toBe('network')
+    expect(mockedFetch).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps the lanes when only the barrier query fails', async () => {
-    mockedTryGetDb.mockResolvedValue(null)
     mockedFetch.mockResolvedValueOnce(oneCycleway()).mockRejectedValueOnce(new Error('502'))
 
-    const { bikeLanes, barriers } = await fetchArea(bbox, true)
+    const { area: fetched } = await fetchArea(bbox, true)
 
-    expect(bikeLanes).toHaveLength(1)
-    expect(barriers).toBeNull()
+    expect(fetched.bikeLanes).toHaveLength(1)
+    expect(fetched.barriers).toBeNull()
   })
 
   it('returns barriers alongside the lanes when both queries succeed', async () => {
-    mockedTryGetDb.mockResolvedValue(null)
     mockedFetch.mockResolvedValueOnce(oneCycleway()).mockResolvedValueOnce(oneArterial())
 
-    const { barriers } = await fetchArea(bbox, true)
+    const { area: fetched } = await fetchArea(bbox, true)
 
-    expect(barriers?.barriers).toHaveLength(1)
-    expect(barriers?.barriers[0].kind).toBe('major_road')
+    expect(fetched.barriers?.barriers).toHaveLength(1)
+    expect(fetched.barriers?.barriers[0].kind).toBe('major_road')
   })
 })
 
-function deniedDb(): Awaited<ReturnType<typeof tryGetDb>> {
-  const denied = () =>
-    Promise.reject(new Error('The user denied permission to access the database.'))
-  return { put: denied, get: denied, getAll: denied, delete: denied } as unknown as Awaited<
-    ReturnType<typeof tryGetDb>
-  >
+function area(id: string, bounds: BoundingBox, fetchedAt: Date): CachedArea {
+  return { id, bbox: bounds, bikeLanes: [], fetchedAt }
+}
+
+function daysAgo(days: number): Date {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 }
 
 function oneArterial(): FeatureCollection {

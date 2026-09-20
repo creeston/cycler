@@ -55,7 +55,7 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 |---|---|---|
 | Fetch bike lanes for the visible map area | **Shipped** | `fetchArea`, `useBikeLanes` |
 | Render the lane network as an orange overlay | **Shipped** | `BikeLaneLayer` |
-| Offline reuse of previously fetched areas | **Shipped** (partial — see §6.6) | `area-cache`, IndexedDB |
+| Offline reuse of previously fetched areas | **Shipped** | `fetchArea`, `loadCachedLanes`, IndexedDB |
 | Suggest an exploratory route from your location | **Shipped** | `exploreStrategy` |
 | Cycle through alternative routes | **Shipped** | route batch cache in `buildRoute` |
 | Route metrics: distance, bike-lane coverage | **Shipped** | `BottomSheet` |
@@ -89,7 +89,8 @@ Controls, in full — this is the entire interactive surface of the application:
 | Control | Enabled when | Effect |
 |---|---|---|
 | Drag handle | always | Collapses the sheet to a 56 px strip |
-| **Load Bike Lanes** | not loading, bbox ≤ 50×50 km | Queries Overpass for the visible area |
+| **Load Bike Lanes** | not loading, bbox ≤ 50×50 km | Reuses a fresh cached area, otherwise queries Overpass |
+| **Refresh** | lanes loaded, not loading, bbox ≤ 50×50 km | Bypasses the cache and queries Overpass |
 | **Suggest Route** | lanes loaded, no current route | Builds and displays a route |
 | **New Route** | a route exists | Serves the next candidate from the batch |
 | **Export GPX** | a route exists | Downloads `route.gpx` |
@@ -151,15 +152,18 @@ network side).
 
 1. The bbox is measured; if either edge exceeds 50 km the request is refused with
    `Zoom in closer — current area is W×H km. Maximum is 50×50 km.`
-2. An Overpass QL query is built for the bbox, selecting `highway=cycleway`,
+2. `fetchArea` returns a fresh exact or containing cached bbox when one exists. A **Refresh**
+   bypasses this lookup.
+3. On a miss, an Overpass QL query is built for the bbox, selecting `highway=cycleway`,
    `cycleway=lane|track|shared_lane|opposite_lane|opposite_track`, `cycleway:left/right=lane|track`,
    and `bicycle=designated` on `path`/`track`/`footway`.
-3. The response is converted to GeoJSON, then to `BikeLane[]`. LineString features only; every
+4. The response is converted to GeoJSON, then to `BikeLane[]`. LineString features only; every
    other geometry is discarded.
-4. The area is written to IndexedDB under a bbox id rounded to 3 decimals.
-5. The store is updated, the overlay redraws, the route batch cache is cleared.
+5. The area is written to IndexedDB under a bbox id rounded to 3 decimals.
+6. The store is updated, the overlay redraws, the route batch cache is cleared.
 
-**Result** `N lanes loaded` appears in the sheet header; the network is on the map.
+**Result** The sheet header reports `N lanes · cached … ago` or `N lanes · updated … ago`; the
+network is on the map.
 **Failure** Any network or HTTP error surfaces in the red banner. There is no retry, no
 alternative mirror, and no way to cancel an in-flight request
 ([`18`](../backlog/18-overpass-resilience.md)).
@@ -234,19 +238,17 @@ still instant.
 **Actor** Returning cyclist · **Trigger** Open the app
 
 1. The viewport is rehydrated from `localStorage` — the map opens where it was left.
-2. `loadAllAreas()` reads every cached area from IndexedDB, drops entries older than 7 days, and
-   flattens the survivors into the store. **All** areas are merged, so a user who has fetched
-   three cities carries all three lane networks.
+2. Expired areas are deleted from IndexedDB. `loadCachedLanes()` then restores only fresh areas
+   intersecting a one-screen margin around the current view; other cities remain stored without
+   being deserialised.
 3. The last route is rehydrated from `localStorage` and redrawn.
 4. If location permission was already granted, the map flies to the current position.
 
 The app is fully usable offline in a previously fetched area — the only network dependency left
 is the base map tiles.
 
-**Known wrinkles** *Load Bike Lanes* always passes `forceRefresh = true`, so the cache is never
-consulted on the fetch path and expired areas are filtered but never deleted
-([`19`](../backlog/19-cache-bypassed-on-fetch.md)). The rehydrated route's `createdAt` comes back
-as a string ([`15`](../backlog/15-persisted-route-rehydration.md)).
+**Known wrinkle** The rehydrated route's `createdAt` comes back as a string
+([`15`](../backlog/15-persisted-route-rehydration.md)).
 
 ---
 
