@@ -560,8 +560,9 @@ Measured by `npm run bench` (`app/integration/graph-build.bench.ts`), median of 
 Doubling the node count from 1 000 to 8 000 (three doublings) multiplied the pair loop's time by
 60 and the index's by 13.5; `graph-build.test.ts` asserts the ratio stays under 32. At 1 000 m
 the remaining cost is the 380 000 candidates the synthetic set produces — every lane there is
-isolated, so nothing is dropped as same-component before the sort — and not the search. What is
-left of the stall is [`17-web-worker`](../backlog/17-web-worker.md).
+isolated, so nothing is dropped as same-component before the sort — and not the search. Since
+[`17-web-worker`](../backlog/done/17-web-worker.md) that time is spent in a worker, off the
+main thread.
 
 ---
 

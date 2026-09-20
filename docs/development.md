@@ -124,10 +124,11 @@ default export.
   is a live bug ([15](../backlog/15-persisted-route-rehydration.md)) — do not add to it.
 - **`react-hooks/exhaustive-deps` is `warn`.** Do not silence it without a comment saying why.
   There is one such disable, in `useBikeLanes`, for a deliberate mount-only effect.
-- **Synchronous work over ~50 ms freezes the map.** `useRoute` yields with
-  `await new Promise(r => setTimeout(r, 0))` so the spinner paints before the graph build. That
-  makes the spinner appear; it does not stop the freeze. For anything heavier, see
-  [17](../backlog/17-web-worker.md).
+- **Synchronous work over ~50 ms freezes the map.** Route computation runs in a Web Worker
+  (`infrastructure/workers/`, [17](../backlog/done/17-web-worker.md)); the worker holds no
+  logic beyond message plumbing, so anything heavy still belongs in the domain and is reached
+  through `findRoutes`. The `setTimeout(0)` yield survives only in the client's main-thread
+  fallback, so the spinner paints when no worker can be made.
 
 ### Formatting
 

@@ -21,14 +21,14 @@ between two lane segments, and the router works within that budget.
 
 > **State of the premise.** The data model expresses this correctly — every route segment is
 > typed `bike_lane` or `gap`, and every route reports its coverage ratio and gap count. The graph
-> is now closer. [`27`](../backlog/27-gap-over-generation.md) pruned the gap edges that carry no
+> is now closer. [`27`](../backlog/done/27-gap-over-generation.md) pruned the gap edges that carry no
 > connectivity: on the Warsaw fixture at the default tolerance they fell from 2 303 to 441.
-> [`28`](../backlog/28-barrier-veto.md) then tested those against real geometry: 41 of the 441
+> [`28`](../backlog/done/28-barrier-veto.md) then tested those against real geometry: 41 of the 441
 > cross a major road, railway or waterway where no crossing is mapped, and the router now avoids
 > them and tells the rider when it could not. Lanes on different levels are no longer bridged at
 > all.
 >
-> [`01`](../backlog/01-gap-penalty-and-tolerance.md) closed the last step: a gap now costs the
+> [`01`](../backlog/done/01-gap-penalty-and-tolerance.md) closed the last step: a gap now costs the
 > router 5–10× its length, so it prefers lanes because the cost function says so, and a route
 > either respects the rider's gap tolerance or states on its face that it was widened. What
 > `bikeLaneCoverage` still cannot tell you is how unpleasant the remaining gaps are — one number
@@ -134,12 +134,11 @@ journey
       Import into Komoot or Garmin: 4: Cyclist
 ```
 
-The two low-scoring steps are both waits, and both are the same underlying cost: a network
-round-trip to Overpass with no progress indication beyond a spinner, and a synchronous graph
-build on the main thread — 71 ms for a 10 000-node city since
-[`16`](../backlog/done/16-spatial-index.md), still on the UI thread until
-[`17`](../backlog/17-web-worker.md) ([`18`](../backlog/18-overpass-resilience.md) covers the
-network side).
+The two low-scoring steps are both waits. The network round-trip to Overpass has no progress
+indication beyond a spinner ([`18`](../backlog/18-overpass-resilience.md)). The route search
+runs in a worker since [`17`](../backlog/done/17-web-worker.md), so the map keeps moving and the
+button fills as start candidates complete; it still takes a few seconds for a city on a slow
+phone.
 
 ---
 
@@ -175,14 +174,16 @@ alternative mirror, and no way to cancel an in-flight request
 **Actor** Cyclist · **Trigger** Tap *Suggest Route*
 **Precondition** At least one bike lane is loaded
 
-1. A spinner is shown; the hook yields to the browser so it actually paints.
+1. The Suggest Route button turns into a progress indicator. It stays tappable: a second tap
+   abandons the running search and starts over, and a Cancel button beside it stops it.
 2. The start point is resolved from `navigator.geolocation` with a 3 s timeout, falling back to
    the map viewport centre. A denied permission is treated as a fallback, not an error.
 3. `buildRoute` looks for a cached batch keyed on every routing preference, with start coordinates
    rounded to three decimal places.
-4. On a miss, `findRoutes` builds the graph, runs the selected Explore, Loop, or one-way strategy
-   from every lane endpoint within 200 m of the start, deduplicates, and — if too few routes
-   emerged — rebuilds at a 1 000 m gap tolerance and retries.
+4. On a miss, the lanes are sent to a Web Worker where `findRoutes` builds the graph, runs the
+   selected Explore, Loop, or one-way strategy from every lane endpoint within 200 m of the
+   start, deduplicates, and — if too few routes emerged — rebuilds at a 1 000 m gap tolerance and
+   retries. The map stays interactive meanwhile.
 5. The batch is shuffled and cached; the first route is returned.
 
 **Result** The route draws in bright orange; distance and coverage appear.

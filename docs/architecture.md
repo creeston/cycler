@@ -87,7 +87,7 @@ graph TD
 | Layer | Modules | Depends on |
 |---|---|---|
 | `domain` | `entities/` (BikeLane, Barrier, Route, RoutePreferences, CachedArea) · `routing/` (graph, spatial-index, route-finder, search, random, algorithms, barriers) · `mappers/` (osm-to-domain, osm-to-barriers, geojson-from-domain) | nothing in-app; only `geojson` types, `graphology`, `@turf/turf` |
-| `infrastructure` | `osm/` (overpass-client, queries) · `cache/` (db, area-cache) · `export/` (gpx) | `domain/entities` |
+| `infrastructure` | `osm/` (overpass-client, queries) · `cache/` (db, area-cache) · `export/` (gpx) · `workers/` (routing.worker, routing-client, routing-protocol) | `domain/entities`, and `domain/routing` from the worker |
 | `application` | `use-cases/` (fetchArea, loadCachedLanes, buildRoute) · `stores/` (map-store, routing-store) | `domain`, `infrastructure` |
 | `presentation` | `components/map` · `components/layout` · `components/ui` · `hooks/` | `application`, plus domain types and view mappers |
 
@@ -165,19 +165,31 @@ around them with no network call, and the cities they are not looking at cost no
 
 Triggered by **Suggest Route**.
 
-1. `setCalculating(true)`, then `await setTimeout(0)` so the spinner paints before the synchronous
-   graph work begins.
+1. `useRoute` numbers the request and sets `isCalculating`. Only the latest request may write
+   to the store when it settles; an older one that finishes later is dropped.
 2. The start point comes from `navigator.geolocation` with a 3 s timeout, falling back to the map
    viewport centre. A denied permission is a fallback, not an error.
-3. `buildRoute` looks for a cached batch keyed on `(lon, lat, maxGapMeters)` at ~100 m precision.
-4. On a miss, `findRoutes` builds the graph, runs the selected strategy from every lane endpoint
-   within `startProximityMeters` of the start, and deduplicates by route signature.
+3. `buildRoute` looks for a cached batch keyed on every routing preference, with the start at
+   ~100 m precision.
+4. On a miss, `postRouteRequest` clones the lanes, barriers and preferences into the routing
+   worker (`infrastructure/workers/`), where `findRoutes` builds the graph, runs the selected
+   strategy from every lane endpoint within `startProximityMeters` of the start, and
+   deduplicates by route signature. The worker posts progress after the graph build and after
+   each start candidate; the button fills to match. The main thread stays free, so the map keeps
+   panning.
 5. If fewer than 3 routes emerged, the graph is rebuilt at a 1 000 m gap tolerance and the
    strategy re-run — see [`01`](../backlog/done/01-gap-penalty-and-tolerance.md).
 6. The batch is shuffled once and cached; the first route is returned and drawn.
 
 **New Route** re-enters the same path and the cache serves the next route from the batch, so
 repeated taps cycle through every candidate before repeating.
+
+**Tapping again while computing** abandons the running search: the client terminates the worker,
+rejects the earlier promise with `RouteRequestCancelledError`, and starts a fresh worker for the
+new request. **Cancel** does the same without starting another. When no `Worker` can be
+constructed, or the worker script fails to load, the client runs `findRoutes` on the main
+thread after one `setTimeout(0)` yield so the spinner paints — the same code path the tests take
+under jsdom.
 
 ### 3.3 Exporting GPX
 
@@ -306,6 +318,9 @@ set by map-pick mode, touch long-press, or desktop right-click.
 
 The base path `/cycler/` is set in **two** places that must stay in sync: `vite.config.ts`
 (`base`, keyed on `command`) and `react-router.config.ts` (`basename`, keyed on `NODE_ENV`).
+The routing worker is bundled by Vite from `new Worker(new URL('./routing.worker.ts',
+import.meta.url), { type: 'module' })` into its own `assets/routing.worker-*.js` chunk, and the
+built URL carries the base path — check that chunk after changing either setting.
 
 Supply-chain policy lives in the repository-level `.npmrc`: a 3-day minimum release age,
 `strict-allow-scripts`, no git/file/URL specifiers, `save-exact`, and `strict-peer-deps`.
@@ -322,7 +337,6 @@ Each is a task in [`/backlog`](../backlog/README.md).
 |---|---|---|
 | Gap edges are unweighted; tolerance is silently widened | The core bike-lane-first guarantee is not enforced | [01](../backlog/done/01-gap-penalty-and-tolerance.md) |
 | Graph nodes exist only where lanes **share a vertex** | Lanes that cross without a shared OSM node are not connected | follow-up of [09](../backlog/done/09-mid-lane-junctions.md) |
-| The graph is built synchronously on the main thread | A 10 000-node city costs ~70 ms per Suggest Route, ~350 ms on the 1 000 m fallback, with the map frozen meanwhile | [17](../backlog/17-web-worker.md) |
 | Distance preferences have no UI | Distance configuration is unreachable | [05](../backlog/05-route-preferences-ui.md) |
 | Overpass has one endpoint, no retry, no abort | A 429 or 504 surfaces as a raw error and loses the request | [18](../backlog/18-overpass-resilience.md) |
 | No tests above the domain layer | Use cases, stores, hooks and infrastructure are unverified | [22](../backlog/22-use-case-tests.md) |

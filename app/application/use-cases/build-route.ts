@@ -1,7 +1,14 @@
-import { findRoutes } from '~/domain/routing/route-finder'
+import { cancelRouteRequest, postRouteRequest } from '~/infrastructure/workers/routing-client'
+import type { RoutingProgress } from '~/domain/routing/route-finder'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 import type { BarrierData } from '~/domain/entities/barrier'
 import type { Route, RoutePreferences } from '~/domain/entities/route'
+
+export { RouteRequestCancelledError } from '~/infrastructure/workers/routing-client'
+
+export interface BuildRouteOptions {
+  onProgress?: (progress: RoutingProgress) => void
+}
 
 interface CacheEntry {
   routes: Route[]
@@ -62,24 +69,31 @@ function cacheEntry(key: string, entry: CacheEntry): void {
   }
 }
 
-export function buildRoute(
+/**
+ * Serves the next route of the cached batch for these preferences, computing
+ * the batch off the main thread on a miss. A call made while another is
+ * still computing abandons it: the earlier promise rejects with
+ * RouteRequestCancelledError.
+ */
+export async function buildRoute(
   lanes: BikeLane[],
   preferences: RoutePreferences,
   barriers?: BarrierData | null,
-): Route {
+  options: BuildRouteOptions = {},
+): Promise<Route> {
   const key = cacheKey(preferences, barriers != null)
   let entry = cachedEntry(key)
 
   if (!entry || entry.routes.length === 0) {
-    const options = { barriers: barriers ?? undefined }
-    const found = findRoutes(lanes, preferences, options)
+    const requestOptions = { barriers, onProgress: options.onProgress }
+    const found = await postRouteRequest(lanes, preferences, requestOptions)
     if (found.length === 0) {
       const hasDestination = preferences.endLon !== undefined && preferences.endLat !== undefined
       if (hasDestination) {
-        const [unrestrictedRoute] = findRoutes(
+        const [unrestrictedRoute] = await postRouteRequest(
           lanes,
           { ...preferences, minDistanceMeters: 0, maxDistanceMeters: Number.MAX_SAFE_INTEGER },
-          options,
+          requestOptions,
         )
         if (unrestrictedRoute) {
           const distance = formatKilometers(unrestrictedRoute.totalDistanceMeters)
@@ -111,6 +125,11 @@ export function buildRoute(
   const route = entry.routes[entry.cursor]
   entry.cursor = (entry.cursor + 1) % entry.routes.length
   return route
+}
+
+/** Abandons the route computation in flight, if any. */
+export function cancelRouteBuild(): void {
+  cancelRouteRequest()
 }
 
 /** Call when bike lane data changes so stale graph results are not served. */

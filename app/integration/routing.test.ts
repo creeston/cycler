@@ -161,6 +161,27 @@ describe('routing integration — Warsaw overpass data', () => {
     })
   })
 
+  describe('progress', () => {
+    it('counts the graph build and every start candidate, ending complete', () => {
+      const reports: { completed: number; total: number }[] = []
+      findRoutes(
+        lanes,
+        { ...BASE_PREFERENCES, minDistanceMeters: 2_000, maxDistanceMeters: 10_000 },
+        { onProgress: progress => reports.push(progress) },
+      )
+
+      expect(reports.length).toBeGreaterThan(2)
+      expect(reports[0]).toEqual({ completed: 0, total: 1 })
+      for (let i = 1; i < reports.length; i++) {
+        expect(reports[i].completed).toBeGreaterThanOrEqual(reports[i - 1].completed)
+        expect(reports[i].total).toBeGreaterThanOrEqual(reports[i - 1].total)
+      }
+      const last = reports[reports.length - 1]
+      expect(last.completed).toBe(last.total)
+      expect(last.total).toBeGreaterThan(1)
+    })
+  })
+
   describe('one-way routing', () => {
     let routes: Route[]
 

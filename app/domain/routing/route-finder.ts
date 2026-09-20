@@ -396,6 +396,38 @@ function buildStrategy(
 }
 
 // ---------------------------------------------------------------------------
+// Progress
+// ---------------------------------------------------------------------------
+
+/** How far a search has got: the graph build is one step, each start candidate another. */
+export interface RoutingProgress {
+  completed: number
+  /** Grows when the search widens the gap tolerance and runs again. */
+  total: number
+}
+
+interface ProgressCounter {
+  add(steps: number): void
+  step(): void
+}
+
+function progressCounter(onProgress?: (progress: RoutingProgress) => void): ProgressCounter {
+  let completed = 0
+  let total = 0
+  const report = () => onProgress?.({ completed, total })
+  return {
+    add: steps => {
+      total += steps
+      report()
+    },
+    step: () => {
+      completed++
+      report()
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Multi-candidate execution
 // ---------------------------------------------------------------------------
 
@@ -428,8 +460,10 @@ function executeWithCandidates(
   startLat: number,
   proximityMeters: number,
   strategy: RoutingStrategy,
+  progress: ProgressCounter,
 ): Route[] {
   const startCandidates = nodesWithinMeters(graph, startLon, startLat, proximityMeters)
+  progress.add(startCandidates.length)
   const seen = new Set<string>()
   const routes: Route[] = []
 
@@ -441,6 +475,7 @@ function executeWithCandidates(
         routes.push(route)
       }
     }
+    progress.step()
   }
 
   return routes
@@ -458,6 +493,8 @@ export interface RoutingOptions {
    * always give the same routes, so a route can be reproduced from its inputs.
    */
   seed?: number
+  /** Called after the graph build and after each start candidate. */
+  onProgress?: (progress: RoutingProgress) => void
 }
 
 /**
@@ -485,9 +522,12 @@ export function findRoutes(
   options: RoutingOptions = {},
 ): Route[] {
   const { startLon, startLat, endLon, endLat, startProximityMeters } = preferences
-  const { barriers, seed = 0 } = options
+  const { barriers, seed = 0, onProgress } = options
+  const progress = progressCounter(onProgress)
 
+  progress.add(1)
   let graph = buildGraph(lanes, preferences.maxGapMeters, { barriers })
+  progress.step()
 
   const endKey =
     endLon !== undefined && endLat !== undefined
@@ -497,14 +537,16 @@ export function findRoutes(
   const strategy = buildStrategy(preferences, seed, endKey)
 
   let routes = withinTolerance(
-    executeWithCandidates(graph, startLon, startLat, startProximityMeters, strategy),
+    executeWithCandidates(graph, startLon, startLat, startProximityMeters, strategy, progress),
   )
 
   const tooFew = endKey ? routes.length === 0 : routes.length < MIN_ROUTES_BEFORE_EXPAND
   if (tooFew && preferences.maxGapMeters < EXPANDED_GAP_METERS) {
+    progress.add(1)
     graph = buildGraph(lanes, EXPANDED_GAP_METERS, { barriers })
+    progress.step()
     routes = withinTolerance(
-      executeWithCandidates(graph, startLon, startLat, startProximityMeters, strategy),
+      executeWithCandidates(graph, startLon, startLat, startProximityMeters, strategy, progress),
     ).map(route => ({ ...route, requestedGapMeters: preferences.maxGapMeters }))
   }
 

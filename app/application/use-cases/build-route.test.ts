@@ -60,9 +60,9 @@ beforeEach(() => {
 })
 
 describe('buildRoute cache', () => {
-  it('reuses a batch and serves its next route when preferences are unchanged', () => {
-    const first = buildRoute(lanes, preferences)
-    const second = buildRoute(lanes, preferences)
+  it('reuses a batch and serves its next route when preferences are unchanged', async () => {
+    const first = await buildRoute(lanes, preferences)
+    const second = await buildRoute(lanes, preferences)
 
     expect(findRoutesMock).toHaveBeenCalledOnce()
     expect(new Set([first.id, second.id])).toEqual(new Set(['first', 'second']))
@@ -70,59 +70,59 @@ describe('buildRoute cache', () => {
 
   it.each(Object.entries(changedPreferenceValues))(
     'does not reuse a batch when %s changes',
-    (field, value) => {
-      buildRoute(lanes, preferences)
-      buildRoute(lanes, { ...preferences, [field]: value })
+    async (field, value) => {
+      await buildRoute(lanes, preferences)
+      await buildRoute(lanes, { ...preferences, [field]: value })
 
       expect(findRoutesMock).toHaveBeenCalledTimes(2)
     },
   )
 
-  it('evicts the least recently used batch after 20 entries', () => {
+  it('evicts the least recently used batch after 20 entries', async () => {
     for (let index = 0; index <= 20; index++) {
-      buildRoute(lanes, { ...preferences, minDistanceMeters: index })
+      await buildRoute(lanes, { ...preferences, minDistanceMeters: index })
     }
 
     expect(findRoutesMock).toHaveBeenCalledTimes(21)
 
-    buildRoute(lanes, { ...preferences, minDistanceMeters: 20 })
+    await buildRoute(lanes, { ...preferences, minDistanceMeters: 20 })
     expect(findRoutesMock).toHaveBeenCalledTimes(21)
 
-    buildRoute(lanes, { ...preferences, minDistanceMeters: 0 })
+    await buildRoute(lanes, { ...preferences, minDistanceMeters: 0 })
     expect(findRoutesMock).toHaveBeenCalledTimes(22)
   })
 
-  it('reports a specific error when no loop can be found', () => {
+  it('reports a specific error when no loop can be found', async () => {
     findRoutesMock.mockReturnValue([])
 
-    expect(() =>
+    await expect(
       buildRoute(lanes, {
         ...preferences,
         endLon: undefined,
         endLat: undefined,
         roundTrip: true,
       }),
-    ).toThrow(
+    ).rejects.toThrow(
       'No loop found here. Try a shorter distance, a larger gap tolerance, or Explore mode.',
     )
   })
 
-  it('distinguishes a disconnected destination', () => {
+  it('distinguishes a disconnected destination', async () => {
     findRoutesMock.mockReturnValue([])
 
-    expect(() => buildRoute(lanes, preferences)).toThrow(
+    await expect(buildRoute(lanes, preferences)).rejects.toThrow(
       'No connected bike route to that point. Try increasing gap tolerance or loading a larger area.',
     )
     expect(findRoutesMock).toHaveBeenCalledTimes(2)
   })
 
-  it('reports the actual distance and retains a reachable route below the range', () => {
+  it('reports the actual distance and retains a reachable route below the range', async () => {
     const shortRoute = route('short', 3_200)
     findRoutesMock.mockReturnValueOnce([]).mockReturnValueOnce([shortRoute])
 
     let error: unknown
     try {
-      buildRoute(lanes, { ...preferences, minDistanceMeters: 10_000 })
+      await buildRoute(lanes, { ...preferences, minDistanceMeters: 10_000 })
     } catch (caught) {
       error = caught
     }
@@ -135,7 +135,24 @@ describe('buildRoute cache', () => {
     expect(findRoutesMock).toHaveBeenLastCalledWith(
       lanes,
       { ...preferences, minDistanceMeters: 0, maxDistanceMeters: Number.MAX_SAFE_INTEGER },
-      { barriers: undefined },
+      { barriers: undefined, onProgress: expect.any(Function) },
     )
+  })
+
+  it('forwards progress and barriers to the search', async () => {
+    const barriers = { barriers: [], crossings: [] }
+    const onProgress = vi.fn()
+    findRoutesMock.mockImplementation((_lanes, _preferences, options) => {
+      options?.onProgress?.({ completed: 1, total: 2 })
+      return [route('first')]
+    })
+
+    await buildRoute(lanes, preferences, barriers, { onProgress })
+
+    expect(findRoutesMock).toHaveBeenCalledWith(lanes, preferences, {
+      barriers,
+      onProgress: expect.any(Function),
+    })
+    expect(onProgress).toHaveBeenCalledWith({ completed: 1, total: 2 })
   })
 })

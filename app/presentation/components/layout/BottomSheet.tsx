@@ -92,9 +92,11 @@ export function BottomSheet() {
   } = useBikeLanes()
   const {
     suggest,
+    cancel: cancelSuggestion,
     clear,
     currentRoute,
     isCalculating,
+    calculationProgress,
     canIgnoreDistanceRange,
     ignoreDistanceRange,
   } = useRoute()
@@ -205,15 +207,29 @@ export function BottomSheet() {
         )}
 
         {bikeLaneCount > 0 && !currentRoute && (
-          <Button
-            className="w-full"
-            onClick={suggest}
-            loading={isCalculating}
-            disabled={isCalculating}
-          >
-            <Route size={16} />
-            Suggest Route
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              className="flex-1"
+              onClick={suggest}
+              loading={isCalculating}
+              progress={calculationProgress}
+              disabled={false}
+              aria-label={isCalculating ? 'Restart route search' : undefined}
+            >
+              <Route size={16} />
+              Suggest Route
+            </Button>
+            {isCalculating && (
+              <Button
+                variant="ghost"
+                onClick={cancelSuggestion}
+                className="px-3 text-gray-400 hover:text-gray-700"
+                aria-label="Cancel route search"
+              >
+                <X size={16} />
+              </Button>
+            )}
+          </div>
         )}
 
         {currentRoute && (
@@ -291,16 +307,29 @@ export function BottomSheet() {
                 variant="ghost"
                 onClick={suggest}
                 loading={isCalculating}
-                disabled={isCalculating}
+                progress={calculationProgress}
+                disabled={false}
                 className="flex-1"
+                aria-label={isCalculating ? 'Restart route search' : undefined}
               >
                 <RefreshCw size={15} />
                 New Route
               </Button>
-              <Button variant="ghost" className="flex-1" onClick={() => downloadGpx(currentRoute)}>
-                <Download size={15} />
-                Export GPX
-              </Button>
+              {isCalculating ? (
+                <Button variant="ghost" className="flex-1" onClick={cancelSuggestion}>
+                  <X size={15} />
+                  Cancel
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  className="flex-1"
+                  onClick={() => downloadGpx(currentRoute)}
+                >
+                  <Download size={15} />
+                  Export GPX
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 onClick={clear}
