@@ -230,7 +230,7 @@ closer than the snapping grid, which is its way of saying "give this scenario po
 ```dot
 // Path that forks at B into two equal-length branches.
 // minDist=600 forces the walk one step past the fork, ensuring the two routes
-// diverge in their third segment and are not collapsed by the signature deduplicator.
+// diverge beyond the shared approach and exercise both branches.
 //
 //   A --200m-- B --200m-- C --200m-- E
 //              |

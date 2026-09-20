@@ -66,8 +66,7 @@ const MIN_LINE_SPACING_DEGREES = 0.00002
  * of the origin, on the equator; an edge between two such nodes defaults its
  * `distance` to the crow-flies distance. Nodes without a position are placed
  * along a line (lineSpacingDegrees), which keeps every node distinguishable
- * by coordinate — the signature() deduplication relies on geometry
- * coordinates[0] — while keeping the A* heuristic admissible.
+ * after coordKey snapping while keeping the A* heuristic admissible.
  */
 export function loadScenario(filePath: string): Scenario {
   const content = readFileSync(filePath, 'utf-8')

@@ -205,8 +205,9 @@ The cached batch is advanced by one, wrapping at the end. No recomputation, so t
 instant. All routes in a batch share every routing preference; because the batch is
 shuffled once at creation, the order is stable within a session.
 
-**Known wrinkle** Mirrored loops count as two distinct entries, so a round-trip batch can present
-the same ride twice in opposite directions ([`12`](../backlog/12-route-dedup-signature.md)).
+Route batches use a canonical node-sequence signature. Opposite traversal directions and loops
+entered at different nodes count as the same ride, while alternatives that differ only at their
+terminal node remain distinct ([`12`](../backlog/done/12-route-dedup-signature.md)).
 
 ---
 

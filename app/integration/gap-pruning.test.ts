@@ -22,7 +22,7 @@ import { geojsonToBikeLanes } from '~/domain/mappers/osm-to-domain'
 import { buildGraph, getGapStats, nodesWithinMeters } from '~/domain/routing/graph'
 import type { BikeLaneGraph } from '~/domain/routing/graph'
 import { osmLevel } from '~/domain/mappers/osm-to-barriers'
-import { runExplore, runRoundTrip } from '~/domain/routing/route-finder'
+import { routeSignature, runExplore, runRoundTrip } from '~/domain/routing/route-finder'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -94,7 +94,7 @@ describe('gap pruning — Warsaw overpass data', () => {
   })
 
   it('still finds many distinct round-trip routes', () => {
-    // Measured: 71 loops at 200 m with seed 42; the random walk this
+    // Measured: 14 distinct loops at 200 m with seed 42; the random walk this
     // replaced found 3.2 on average and needed the 1 000 m fallback.
     expect(countRoutes(buildGraph(lanes, 200), true)).toBeGreaterThan(5)
   })
@@ -156,7 +156,7 @@ function countRoutes(graph: BikeLaneGraph, roundTrip: boolean): number {
       ? runRoundTrip(graph, startKey, 2_000, 10_000, 42)
       : runExplore(graph, startKey, 2_000, 10_000)
     for (const route of routes) {
-      signatures.add(route.segments.map(s => s.geometry.coordinates[0].join(',')).join('|'))
+      signatures.add(routeSignature(route.segments))
     }
   }
 

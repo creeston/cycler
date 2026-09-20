@@ -778,20 +778,27 @@ explore went from 39 ms to 16 ms and round trips from 97 ms to 40 ms.
 Candidate routes from all start nodes are deduplicated by
 
 $$
-\text{sig}(r) = \text{join}\bigl(\,[\,c_0(s_1),\, c_0(s_2),\, \dots,\, c_0(s_k)\,],\ \texttt{"|"}\,\bigr)
+N(r) = [\,\operatorname{key}(c_0(s_1)),\,\dots,\,\operatorname{key}(c_0(s_k)),\,
+\operatorname{key}(c_{\mathrm{last}}(s_k))\,]
 $$
 
-— the first coordinate of each segment, in order. Since `orientedGeometry` rewrites each segment
-to point along the direction of travel, this is the route's node sequence **minus its final
-node**. Two consequences:
+where `key` is `coordKey`, so coordinates are compared on the same snapped grid that identifies
+graph nodes. For an open route, the signature is the lexicographically smaller of `N(r)` and its
+reverse. For a closed route, the repeated terminal node is removed and the signature is the
+smallest rotation across both traversal directions. Thus the complete node sequence participates:
 
-- **False positives.** `A→B→C→D` and `A→B→C→E` both have signature `A|B|C`. One of them is
-  silently dropped.
-- **False negatives.** A loop and its mirror image, `A→B→C→D→A` and `A→D→C→B→A`, produce
-  `A|B|C|D` and `A|D|C|B`. They are the same ride and both are kept, wasting slots in the batch
-  that "New Route" cycles through.
+- `A→B→C→D` and `A→B→C→E` remain distinct because their terminal nodes differ.
+- `A→B→C` and `C→B→A` are the same ride.
+- `A→B→C→A`, its reverse, and the same loop entered at `B` are the same ride.
 
-Tracked as [`12-route-dedup-signature`](../backlog/12-route-dedup-signature.md).
+The ordered node sequence is deliberate. A sorted edge-set signature would make direction and
+loop entry irrelevant more simply, but would also erase traversal multiplicity: riding an edge
+out and back is not the same route as riding it once. The minimal loop rotation is found in
+linear time, so signature construction remains $O(k)$ for a route of $k$ segments.
+
+On the Warsaw fixture at 2–10 km with seed 42, explore remains at 126 routes while round-trip
+falls from 71 candidates to 14 distinct rides after mirror and alternate-entry copies are merged.
+Implemented by [`12-route-dedup-signature`](../backlog/done/12-route-dedup-signature.md).
 
 ### 6.2 Gap-tolerance expansion
 

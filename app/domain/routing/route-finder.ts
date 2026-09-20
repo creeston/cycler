@@ -5,7 +5,7 @@ import type { Route, RoutePreferences, RouteSegment } from '../entities/route'
 import { buildGraph, getGapStats, getMaxGapMeters, nearestNode, nodesWithinMeters } from './graph'
 import type { BikeLaneGraph, EdgeAttrs } from './graph'
 import { longestGapMeters } from '../entities/route'
-import { bearingDegrees, destinationPoint } from './algorithms'
+import { bearingDegrees, coordKey, destinationPoint } from './algorithms'
 import { seededRandom } from './random'
 import { astar, haversineTo, shortestPathTree, treePath } from './search'
 import type { TreeNode } from './search'
@@ -89,9 +89,72 @@ function segmentsToRoute(
   }
 }
 
-/** Route signature for deduplication — first coord of every segment joined. */
-function signature(segments: RouteSegment[]): string {
-  return segments.map(s => s.geometry.coordinates[0].join(',')).join('|')
+function compareKeys(a: string, b: string): number {
+  if (a < b) return -1
+  if (a > b) return 1
+  return 0
+}
+
+/** Returns the lexicographically smallest rotation in linear time. */
+function minimalRotation(keys: string[]): string[] {
+  if (keys.length < 2) return [...keys]
+
+  const doubled = [...keys, ...keys]
+  const length = keys.length
+  let first = 0
+  let second = 1
+  let offset = 0
+
+  while (first < length && second < length && offset < length) {
+    const comparison = compareKeys(doubled[first + offset], doubled[second + offset])
+    if (comparison === 0) {
+      offset++
+      continue
+    }
+
+    if (comparison > 0) {
+      first += offset + 1
+      if (first === second) first++
+    } else {
+      second += offset + 1
+      if (first === second) second++
+    }
+    offset = 0
+  }
+
+  const start = Math.min(first, second)
+  return doubled.slice(start, start + length)
+}
+
+/**
+ * Canonical node-sequence signature for route deduplication.
+ *
+ * Coordinates are snapped through coordKey, open routes compare equal in
+ * either direction, and loops additionally compare equal from every entry
+ * node. Keeping the ordered node sequence (rather than only an edge set)
+ * preserves repeated traversals as part of the ride.
+ */
+export function routeSignature(segments: RouteSegment[]): string {
+  if (segments.length === 0) return ''
+
+  const keys = segments.map(segment => {
+    const [lon, lat] = segment.geometry.coordinates[0]
+    return coordKey(lon, lat)
+  })
+  const finalCoordinates = segments[segments.length - 1].geometry.coordinates
+  const [finalLon, finalLat] = finalCoordinates[finalCoordinates.length - 1]
+  keys.push(coordKey(finalLon, finalLat))
+
+  if (keys[0] === keys[keys.length - 1]) {
+    const cycle = keys.slice(0, -1)
+    const forward = minimalRotation(cycle).join('|')
+    const reverse = minimalRotation([...cycle].reverse()).join('|')
+    return forward < reverse ? forward : reverse
+  }
+
+  const forward = keys.join('|')
+  const reverse = [...keys].reverse().join('|')
+  return forward < reverse ? forward : reverse
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +368,7 @@ function toRoutes(graph: BikeLaneGraph, candidates: RouteSegment[][]): Route[] {
   const seen = new Set<string>()
   const routes: Route[] = []
   for (const segments of candidates) {
-    const sig = signature(segments)
+    const sig = routeSignature(segments)
     if (seen.has(sig)) continue
     seen.add(sig)
     routes.push(segmentsToRoute(segments, barriersChecked, gapMeters))
@@ -469,7 +532,7 @@ function executeWithCandidates(
 
   for (const startKey of startCandidates) {
     for (const route of strategy.findRoutes(graph, startKey)) {
-      const sig = signature(route.segments)
+      const sig = routeSignature(route.segments)
       if (!seen.has(sig)) {
         seen.add(sig)
         routes.push(route)

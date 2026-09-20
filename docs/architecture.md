@@ -174,9 +174,9 @@ Triggered by **Suggest Route**.
 4. On a miss, `postRouteRequest` clones the lanes, barriers and preferences into the routing
    worker (`infrastructure/workers/`), where `findRoutes` builds the graph, runs the selected
    strategy from every lane endpoint within `startProximityMeters` of the start, and
-   deduplicates by route signature. The worker posts progress after the graph build and after
-   each start candidate; the button fills to match. The main thread stays free, so the map keeps
-   panning.
+   deduplicates by canonical node-sequence signature. The worker posts progress after the graph
+   build and after each start candidate; the button fills to match. The main thread stays free,
+   so the map keeps panning.
 5. If fewer than 3 routes emerged, the graph is rebuilt at a 1 000 m gap tolerance and the
    strategy re-run — see [`01`](../backlog/done/01-gap-penalty-and-tolerance.md).
 6. The batch is shuffled once and cached; the first route is returned and drawn.

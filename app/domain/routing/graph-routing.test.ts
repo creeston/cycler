@@ -141,6 +141,11 @@ describe('graph routing scenarios', () => {
     check(runScenario(sc), sc)
   })
 
+  it('terminal-fan-out: keeps routes that differ only at their terminal node', () => {
+    const sc = loadScenario(scenario('terminal-fan-out.dot'))
+    check(runScenario(sc), sc)
+  })
+
   it('isolated-lanes: returns no routes when all segments are too short', () => {
     const sc = loadScenario(scenario('isolated-lanes.dot'))
     check(runScenario(sc), sc)

@@ -16,6 +16,7 @@ graph round_trip {
     maxDist = 5000,
     roundTrip = "true",
     expect_isRoundTrip = "true",
+    expect_maxRoutes = 1,
     expect_any_route = "A,B,C,D,A;A,D,C,B,A"
   ]
 
