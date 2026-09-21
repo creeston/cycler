@@ -35,3 +35,34 @@ it('revives a persisted route creation date during rehydration', async () => {
   expect(createdAt).toBeInstanceOf(Date)
   expect(createdAt?.getTime()).toBe(Date.parse('2026-09-20T08:30:00.000Z'))
 })
+
+it('drops the old 0,0 start sentinel so the device position is used instead', async () => {
+  localStorage.setItem(
+    'cycle-routing',
+    JSON.stringify({
+      state: { currentRoute: null, preferences: { startLon: 0, startLat: 0, maxGapMeters: 300 } },
+      version: 0,
+    }),
+  )
+
+  const { useRoutingStore } = await import('./routing-store')
+  const { preferences } = useRoutingStore.getState()
+
+  expect(preferences.startLon).toBeUndefined()
+  expect(preferences.startLat).toBeUndefined()
+  expect(preferences.maxGapMeters).toBe(300)
+})
+
+it('keeps a start point that was actually chosen when migrating', async () => {
+  localStorage.setItem(
+    'cycle-routing',
+    JSON.stringify({
+      state: { currentRoute: null, preferences: { startLon: 21.01, startLat: 52.23 } },
+      version: 0,
+    }),
+  )
+
+  const { useRoutingStore } = await import('./routing-store')
+
+  expect(useRoutingStore.getState().preferences).toMatchObject({ startLon: 21.01, startLat: 52.23 })
+})

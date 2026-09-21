@@ -8,14 +8,14 @@ import { geojsonToBarriers } from '~/domain/mappers/osm-to-barriers'
 import { findRoutes } from '~/domain/routing/route-finder'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 import type { BarrierData } from '~/domain/entities/barrier'
-import type { Route, RoutePreferences } from '~/domain/entities/route'
+import type { ResolvedRoutePreferences, Route } from '~/domain/entities/route'
 import { handleRouteRequest } from './routing-protocol'
 import type { RouteReply } from './routing-protocol'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SCENARIOS = join(__dirname, '../../domain/routing/scenarios')
 
-const preferences: RoutePreferences = {
+const preferences: ResolvedRoutePreferences = {
   startLon: 20.93628,
   startLat: 52.290873,
   maxGapMeters: 200,

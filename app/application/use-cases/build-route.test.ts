@@ -65,7 +65,7 @@ describe('buildRoute cache', () => {
     const second = await buildRoute(lanes, preferences)
 
     expect(findRoutesMock).toHaveBeenCalledOnce()
-    expect(new Set([first.id, second.id])).toEqual(new Set(['first', 'second']))
+    expect(new Set([first.route.id, second.route.id])).toEqual(new Set(['first', 'second']))
   })
 
   it.each(Object.entries(changedPreferenceValues))(
@@ -131,6 +131,7 @@ describe('buildRoute cache', () => {
     expect(error).toMatchObject({
       message: 'The route there is only 3.2 km, below your 10 km minimum.',
       route: shortRoute,
+      startSource: 'picked',
     })
     expect(findRoutesMock).toHaveBeenLastCalledWith(
       lanes,
@@ -154,5 +155,56 @@ describe('buildRoute cache', () => {
       onProgress: expect.any(Function),
     })
     expect(onProgress).toHaveBeenCalledWith({ completed: 1, total: 2 })
+  })
+})
+
+describe('buildRoute start point', () => {
+  const unset = { ...preferences, startLon: undefined, startLat: undefined }
+
+  it('routes from a picked start without asking for the device position', async () => {
+    const locate = vi.fn().mockResolvedValue([1, 1])
+
+    const built = await buildRoute(lanes, preferences, null, { locate, mapCentre: [2, 2] })
+
+    expect(locate).not.toHaveBeenCalled()
+    expect(built.startSource).toBe('picked')
+    expect(findRoutesMock.mock.calls[0][1]).toMatchObject({ startLon: 21.0001, startLat: 52.0001 })
+  })
+
+  it('routes from the device position when no start was picked', async () => {
+    const locate = vi.fn().mockResolvedValue([21.5, 52.5])
+
+    const built = await buildRoute(lanes, unset, null, { locate, mapCentre: [2, 2] })
+
+    expect(built.startSource).toBe('device')
+    expect(findRoutesMock.mock.calls[0][1]).toMatchObject({ startLon: 21.5, startLat: 52.5 })
+  })
+
+  it('routes from the map centre when the device position is unavailable', async () => {
+    const locate = vi.fn().mockResolvedValue(null)
+
+    const built = await buildRoute(lanes, unset, null, { locate, mapCentre: [21.7, 52.7] })
+
+    expect(built.startSource).toBe('map-centre')
+    expect(findRoutesMock.mock.calls[0][1]).toMatchObject({ startLon: 21.7, startLat: 52.7 })
+  })
+
+  it('never routes from Null Island when the start is unset', async () => {
+    const locate = vi.fn().mockResolvedValue(null)
+
+    await expect(buildRoute(lanes, unset, null, { locate })).rejects.toThrow(
+      'No start point: pick one on the map or allow location access.',
+    )
+    expect(findRoutesMock).not.toHaveBeenCalled()
+  })
+
+  it('serves a fresh batch when the start search radius changes', async () => {
+    const locate = vi.fn().mockResolvedValue([21.5, 52.5])
+
+    await buildRoute(lanes, { ...unset, startProximityMeters: 200 }, null, { locate })
+    await buildRoute(lanes, { ...unset, startProximityMeters: 50 }, null, { locate })
+
+    expect(findRoutesMock).toHaveBeenCalledTimes(2)
+    expect(findRoutesMock.mock.calls[1][1]).toMatchObject({ startProximityMeters: 50 })
   })
 })

@@ -68,8 +68,13 @@ export function isRoundTrip(route: Route): boolean {
 }
 
 export interface RoutePreferences {
-  startLon: number
-  startLat: number
+  /**
+   * Where the ride begins, when the rider picked a point on the map. Unset
+   * means the device position, or the map centre when that is unavailable;
+   * buildRoute resolves it before the search runs.
+   */
+  startLon?: number
+  startLat?: number
   /** When set together with endLat, triggers one-way routing from start to end. */
   endLon?: number
   endLat?: number
@@ -79,6 +84,8 @@ export interface RoutePreferences {
    * All bike lane endpoints within this radius of the start coordinate are
    * used as route candidates, increasing route diversity when the user is near
    * multiple lane entrances. Falls back to the nearest node when none are found.
+   * Unrelated to maxGapMeters: this is how far the rider reaches the network,
+   * that is how much road they accept once on it.
    */
   startProximityMeters: number
   minDistanceMeters: number
@@ -91,9 +98,16 @@ export interface RoutePreferences {
   roundTrip: boolean
 }
 
+/** Preferences with the start point decided: what the router runs on. */
+export interface ResolvedRoutePreferences extends RoutePreferences {
+  startLon: number
+  startLat: number
+}
+
+export const MIN_START_PROXIMITY_METERS = 50
+export const MAX_START_PROXIMITY_METERS = 1_000
+
 export const DEFAULT_PREFERENCES: RoutePreferences = {
-  startLon: 0,
-  startLat: 0,
   maxGapMeters: 200,
   startProximityMeters: 200,
   minDistanceMeters: 10_000,

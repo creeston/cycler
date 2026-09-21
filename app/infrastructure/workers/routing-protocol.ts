@@ -2,14 +2,14 @@ import { findRoutes } from '~/domain/routing/route-finder'
 import type { RoutingProgress } from '~/domain/routing/route-finder'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 import type { BarrierData } from '~/domain/entities/barrier'
-import type { Route, RoutePreferences } from '~/domain/entities/route'
+import type { ResolvedRoutePreferences, Route } from '~/domain/entities/route'
 
 /** One search, sent from the main thread to the routing worker. */
 export interface RouteRequest {
   /** Matches replies to the request they answer; a reply for another id is stale. */
   id: number
   lanes: BikeLane[]
-  preferences: RoutePreferences
+  preferences: ResolvedRoutePreferences
   barriers: BarrierData | null
 }
 

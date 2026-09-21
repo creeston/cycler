@@ -5,24 +5,10 @@ import {
   DestinationRouteOutsideRangeError,
   RouteRequestCancelledError,
 } from '~/application/use-cases/build-route'
+import type { BuiltRoute } from '~/application/use-cases/build-route'
 import { useMapStore } from '~/application/stores/map-store'
 import { useRoutingStore } from '~/application/stores/routing-store'
-import type { Route } from '~/domain/entities/route'
 import type { RoutingProgress } from '~/domain/routing/route-finder'
-
-async function resolveStartPoint(
-  fallbackLon: number,
-  fallbackLat: number,
-): Promise<[number, number]> {
-  if (!navigator.geolocation) return [fallbackLon, fallbackLat]
-  return new Promise(resolve => {
-    navigator.geolocation.getCurrentPosition(
-      pos => resolve([pos.coords.longitude, pos.coords.latitude]),
-      () => resolve([fallbackLon, fallbackLat]),
-      { timeout: 3_000, maximumAge: 60_000 },
-    )
-  })
-}
 
 function fractionDone({ completed, total }: RoutingProgress): number | null {
   return total > 0 ? completed / total : null
@@ -33,6 +19,7 @@ export function useRoute() {
   const barriers = useMapStore(s => s.barriers)
   const viewport = useMapStore(s => s.viewport)
   const currentRoute = useRoutingStore(s => s.currentRoute)
+  const routeStartSource = useRoutingStore(s => s.routeStartSource)
   const preferences = useRoutingStore(s => s.preferences)
   const isCalculating = useRoutingStore(s => s.isCalculating)
   const calculationProgress = useRoutingStore(s => s.calculationProgress)
@@ -40,7 +27,7 @@ export function useRoute() {
   const setCalculating = useRoutingStore(s => s.setCalculating)
   const setCalculationProgress = useRoutingStore(s => s.setCalculationProgress)
   const setRouteError = useRoutingStore(s => s.setRouteError)
-  const [outsideRangeRoute, setOutsideRangeRoute] = useState<Route | null>(null)
+  const [outsideRangeRoute, setOutsideRangeRoute] = useState<BuiltRoute | null>(null)
   // Counts suggestions; only the latest one may touch the store when it settles.
   const latestRequest = useRef(0)
 
@@ -60,17 +47,18 @@ export function useRoute() {
     setRouteError(null)
     setOutsideRangeRoute(null)
     try {
-      const [startLon, startLat] = await resolveStartPoint(viewport.longitude, viewport.latitude)
-      if (!isLatest()) return
-      const route = await buildRoute(bikeLanes, { ...preferences, startLon, startLat }, barriers, {
+      const built = await buildRoute(bikeLanes, preferences, barriers, {
+        mapCentre: [viewport.longitude, viewport.latitude],
         onProgress: progress => {
           if (isLatest()) setCalculationProgress(fractionDone(progress))
         },
       })
-      if (isLatest()) setRoute(route)
+      if (isLatest()) setRoute(built.route, built.startSource)
     } catch (err) {
       if (!isLatest() || err instanceof RouteRequestCancelledError) return
-      if (err instanceof DestinationRouteOutsideRangeError) setOutsideRangeRoute(err.route)
+      if (err instanceof DestinationRouteOutsideRangeError) {
+        setOutsideRangeRoute({ route: err.route, startSource: err.startSource })
+      }
       setRouteError(err instanceof Error ? err.message : 'Failed to build route')
     } finally {
       if (isLatest()) finish()
@@ -97,7 +85,7 @@ export function useRoute() {
 
   const ignoreDistanceRange = useCallback(() => {
     if (!outsideRangeRoute) return
-    setRoute(outsideRangeRoute)
+    setRoute(outsideRangeRoute.route, outsideRangeRoute.startSource)
     setRouteError(null)
     setOutsideRangeRoute(null)
   }, [outsideRangeRoute, setRoute, setRouteError])
@@ -107,6 +95,7 @@ export function useRoute() {
     cancel,
     clear,
     currentRoute,
+    routeStartSource,
     isCalculating,
     calculationProgress,
     preferences,

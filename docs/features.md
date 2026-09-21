@@ -60,12 +60,14 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 | Cycle through alternative routes | **Shipped** | route batch cache in `buildRoute` |
 | Route metrics: distance, bike-lane coverage | **Shipped** | `BottomSheet` |
 | Route metric: gap count | Computed, **not displayed** | [`25`](../backlog/25-gap-count-metric-ui.md) |
-| GPX export | **Shipped** | `downloadGpx` · [`20`](../backlog/20-gpx-hardening.md) |
+| GPX export | **Shipped** | `downloadGpx` · [`20`](../backlog/done/20-gpx-hardening.md) |
 | Geolocation marker and fly-to | **Shipped** | `CycleMap` |
 | Viewport restored between sessions | **Shipped** | `map-store` persist |
 | Round-trip (loop) routing | **Shipped** | `roundTripStrategy`, `BottomSheet` |
 | Point-to-point routing to a destination | **Shipped** | `oneWayStrategy`, `CycleMap` |
 | Gap tolerance control | **Shipped** — persisted 0–500 m slider | `BottomSheet` |
+| Start point: current location or a point on the map | **Shipped** — with the source shown on the route | `BottomSheet`, `CycleMap` · [`29`](../backlog/done/29-start-point-selection.md) |
+| Start search radius control | **Shipped** — persisted 50–1 000 m slider | `BottomSheet` · [`29`](../backlog/done/29-start-point-selection.md) |
 | Distance range control | **Not started** — fixed at 10–30 km | [`05`](../backlog/05-route-preferences-ui.md) |
 | Surface preference | **Not started** — `surface` parsed, never used | [`05`](../backlog/05-route-preferences-ui.md) |
 | Address search (geocoding) | **Not started** | [`07`](../backlog/07-nominatim-geocoder.md) |
@@ -73,8 +75,8 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 | Turn-by-turn navigation | **Out of scope** | — |
 | Elevation profile | **Out of scope** | — |
 
-All three routing strategies are reachable from the preferences section. A destination can be
-chosen with map-pick mode, a touch long-press, or a desktop right-click.
+All three routing strategies are reachable from the preferences section. A start point or a
+destination can be chosen with map-pick mode, a touch long-press, or a desktop right-click.
 
 ---
 
@@ -99,9 +101,11 @@ Controls, in full — this is the entire interactive surface of the application:
 | Saved route | saved routes exist | Loads it as the current route |
 | Saved-route export / delete | saved routes exist | Exports without loading, or confirms and deletes |
 | Explore / Loop / To destination | always | Selects the routing mode |
+| Current location / Pick on map | always | Chooses where the route starts; *Current location* clears the picked point |
+| Start search radius | always | Sets the persisted radius, 50–1 000 m, within which lane ends become start candidates |
 | Gap tolerance | always | Sets the persisted maximum gap from 0–500 m |
-| Map tap | destination-picking mode | Sets the destination |
-| Map long-press / right-click | always | Sets the destination directly |
+| Map tap | start- or destination-picking mode | Sets the start while one is being chosen, else the destination |
+| Map long-press / right-click | always | Sets the start while one is being chosen, else the destination |
 | Zoom in / out | always | MapLibre `NavigationControl` |
 | Locate | always | MapLibre `GeolocateControl`, `maxZoom: 15` |
 | Pan / pinch | always | Updates viewport and bbox; rotation and pitch are disabled |
@@ -182,24 +186,27 @@ is silent ([`18`](../backlog/done/18-overpass-resilience.md)).
 
 1. The Suggest Route button turns into a progress indicator. It stays tappable: a second tap
    abandons the running search and starts over, and a Cancel button beside it stops it.
-2. The start point is resolved from `navigator.geolocation` with a 3 s timeout, falling back to
-   the map viewport centre. A denied permission is treated as a fallback, not an error.
+2. The start point is resolved: a point picked on the map wins; otherwise
+   `navigator.geolocation` is asked with a 3 s timeout, and the map viewport centre stands in when
+   it does not answer. A denied permission is treated as a fallback, not an error.
 3. `buildRoute` looks for a cached batch keyed on every routing preference, with start coordinates
    rounded to three decimal places.
 4. On a miss, the lanes are sent to a Web Worker where `findRoutes` builds the graph, runs the
-   selected Explore, Loop, or one-way strategy from every lane endpoint within 200 m of the
-   start, deduplicates, and — if too few routes emerged — rebuilds at a 1 000 m gap tolerance and
+   selected Explore, Loop, or one-way strategy from every lane endpoint within the start search
+   radius (default 200 m), deduplicates, and — if too few routes emerged — rebuilds at a 1 000 m gap tolerance and
    retries. The map stays interactive meanwhile.
 5. The batch is shuffled and cached; the first route is returned.
 
-**Result** The route draws in bright orange; distance and coverage appear.
+**Result** The route draws in bright orange; distance and coverage appear, with a *Start* line
+naming the source used — *Current location*, *Picked on map*, or *Map centre — location
+unavailable*. A green marker sits where the route actually begins.
 **Failure** Explore mode shows the generic no-route message. Loop mode suggests a shorter
 distance, a larger gap tolerance, or switching back to Explore. Destination mode distinguishes a
 disconnected graph from a reachable route outside the distance range; the latter can be accepted
 with **Ignore distance range**.
 
-**Current constraints** Distance remains fixed at 10–30 km. Gap tolerance and routing mode are
-user-selectable and persisted.
+**Current constraints** Distance remains fixed at 10–30 km. Gap tolerance, start search radius,
+start point and routing mode are user-selectable and persisted.
 
 ---
 
@@ -226,7 +233,7 @@ records the route name, distance, lane coverage, gap count, creation time, bound
 CycleRoute. Contiguous lane and gap runs are separate `<trkseg>` elements with their type in a
 namespaced extension; repeated joins within a run are omitted. The escaped track name cannot
 break the XML, and the downloaded filename includes the distance and route date. See
-[`20`](../backlog/20-gpx-hardening.md).
+[`20`](../backlog/done/20-gpx-hardening.md).
 
 ---
 

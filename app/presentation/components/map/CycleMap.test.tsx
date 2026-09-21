@@ -42,6 +42,7 @@ beforeEach(() => {
   localStorage.clear()
   useRoutingStore.setState({
     currentRoute: null,
+    isChoosingStart: false,
     isChoosingDestination: false,
     preferences: { ...DEFAULT_PREFERENCES },
     routeError: null,
@@ -209,3 +210,128 @@ describe('CycleMap destination selection', () => {
     expect(screen.queryByLabelText('Destination')).not.toBeInTheDocument()
   })
 })
+
+describe('CycleMap start selection', () => {
+  it('sets the start from a map click while start-picking mode is active', () => {
+    useRoutingStore.setState({ isChoosingStart: true })
+    render(<CycleMap />)
+
+    act(() =>
+      mapHandler<{ lngLat: { lng: number; lat: number } }>('onClick')({
+        lngLat: { lng: 21.12, lat: 52.23 },
+      }),
+    )
+
+    expect(useRoutingStore.getState().preferences).toMatchObject({
+      startLon: 21.12,
+      startLat: 52.23,
+    })
+    expect(useRoutingStore.getState().preferences.endLon).toBeUndefined()
+    expect(useRoutingStore.getState().isChoosingStart).toBe(false)
+    const marker = screen.getByLabelText('Start').parentElement
+    expect(marker).toHaveAttribute('data-longitude', '21.12')
+    expect(marker).toHaveAttribute('data-latitude', '52.23')
+  })
+
+  it('serves the start, not the destination, from a long-press while picking a start', () => {
+    useRoutingStore.setState({ isChoosingStart: true })
+    render(<CycleMap />)
+
+    act(() =>
+      mapHandler<{ lngLat: { lng: number; lat: number } }>('onTouchStart')({
+        lngLat: { lng: 21.2, lat: 52.3 },
+      }),
+    )
+    act(() => vi.advanceTimersByTime(500))
+
+    expect(useRoutingStore.getState().preferences).toMatchObject({
+      startLon: 21.2,
+      startLat: 52.3,
+    })
+    expect(useRoutingStore.getState().preferences.endLon).toBeUndefined()
+  })
+
+  it('serves the start first when both points are being chosen', () => {
+    useRoutingStore.setState({ isChoosingStart: true, isChoosingDestination: true })
+    render(<CycleMap />)
+
+    act(() =>
+      mapHandler<{ lngLat: { lng: number; lat: number } }>('onClick')({
+        lngLat: { lng: 21.12, lat: 52.23 },
+      }),
+    )
+    act(() =>
+      mapHandler<{ lngLat: { lng: number; lat: number } }>('onClick')({
+        lngLat: { lng: 21.3, lat: 52.4 },
+      }),
+    )
+
+    expect(useRoutingStore.getState().preferences).toMatchObject({
+      startLon: 21.12,
+      startLat: 52.23,
+      endLon: 21.3,
+      endLat: 52.4,
+    })
+  })
+
+  it('clears the route when a new start is picked', () => {
+    useRoutingStore.setState({ isChoosingStart: true, currentRoute: routeFrom(21, 52) })
+    render(<CycleMap />)
+
+    act(() =>
+      mapHandler<{ lngLat: { lng: number; lat: number } }>('onClick')({
+        lngLat: { lng: 21.12, lat: 52.23 },
+      }),
+    )
+
+    expect(useRoutingStore.getState().currentRoute).toBeNull()
+  })
+
+  it('moves the start marker to where the route actually begins', () => {
+    useRoutingStore.setState(state => ({
+      currentRoute: routeFrom(21.001, 52.001),
+      preferences: { ...state.preferences, startLon: 21, startLat: 52 },
+    }))
+
+    render(<CycleMap />)
+
+    const marker = screen.getByLabelText('Start').parentElement
+    expect(marker).toHaveAttribute('data-longitude', '21.001')
+    expect(marker).toHaveAttribute('data-latitude', '52.001')
+  })
+
+  it('shows no start marker without a picked start or a route', () => {
+    render(<CycleMap />)
+
+    expect(screen.queryByLabelText('Start')).not.toBeInTheDocument()
+  })
+})
+
+function routeFrom(longitude: number, latitude: number): Route {
+  return {
+    id: 'route',
+    segments: [
+      {
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [longitude, latitude],
+            [21.15, 52.25],
+          ],
+        },
+        type: 'bike_lane',
+        distanceMeters: 1_000,
+      },
+    ],
+    totalDistanceMeters: 1_000,
+    bikeLaneDistanceMeters: 1_000,
+    bikeLaneCoverage: 1,
+    gapCount: 0,
+    gapDistanceMeters: 0,
+    barrierCrossingCount: 0,
+    barriersChecked: true,
+    requestedGapMeters: 200,
+    appliedGapMeters: 200,
+    createdAt: new Date(0),
+  }
+}

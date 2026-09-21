@@ -55,6 +55,8 @@ beforeEach(() => {
   localStorage.clear()
   useRoutingStore.setState({
     currentRoute: null,
+    routeStartSource: null,
+    isChoosingStart: false,
     isChoosingDestination: false,
     preferences: { ...DEFAULT_PREFERENCES },
     routeError: null,
@@ -320,6 +322,83 @@ describe('BottomSheet preferences', () => {
     render(<BottomSheet />)
 
     expect(screen.queryByText(/gap tolerance/)).not.toBeInTheDocument()
+  })
+
+  it('enters start-picking mode and clears the start to unset, not to 0,0, when leaving it', () => {
+    render(<BottomSheet />)
+    fireEvent.click(screen.getByText('Preferences'))
+    fireEvent.click(screen.getByRole('radio', { name: 'Pick on map' }))
+
+    expect(useRoutingStore.getState().isChoosingStart).toBe(true)
+    expect(screen.getByText('Tap the map to choose a start point')).toBeInTheDocument()
+
+    act(() => {
+      useRoutingStore.setState(state => ({
+        isChoosingStart: false,
+        preferences: { ...state.preferences, startLon: 21.1, startLat: 52.1 },
+      }))
+    })
+    expect(screen.getByRole('radio', { name: 'Pick on map' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Current location' }))
+
+    expect(useRoutingStore.getState().preferences.startLon).toBeUndefined()
+    expect(useRoutingStore.getState().preferences.startLat).toBeUndefined()
+    expect(useRoutingStore.getState().isChoosingStart).toBe(false)
+    expect(screen.queryByText('Tap the map to choose a start point')).not.toBeInTheDocument()
+  })
+
+  it('debounces and persists the start search radius separately from the gap tolerance', () => {
+    render(<BottomSheet />)
+    fireEvent.click(screen.getByText('Preferences'))
+
+    const slider = screen.getByRole('slider', { name: 'Start search radius' })
+    expect(slider).toHaveAttribute('min', '50')
+    expect(slider).toHaveAttribute('max', '1000')
+    fireEvent.change(slider, { target: { value: '500' } })
+
+    expect(screen.getByText('500 m')).toBeInTheDocument()
+    expect(useRoutingStore.getState().preferences.startProximityMeters).toBe(200)
+
+    act(() => vi.advanceTimersByTime(200))
+
+    expect(useRoutingStore.getState().preferences.startProximityMeters).toBe(500)
+    expect(useRoutingStore.getState().preferences.maxGapMeters).toBe(200)
+    const persisted = JSON.parse(localStorage.getItem('cycle-routing') ?? '{}') as {
+      state?: { preferences?: RoutePreferences }
+    }
+    expect(persisted.state?.preferences?.startProximityMeters).toBe(500)
+  })
+
+  it('says when the map centre stood in for the device position', () => {
+    useRoutingStore.setState({
+      currentRoute: routeWithCrossings(0, true),
+      routeStartSource: 'map-centre',
+    })
+    render(<BottomSheet />)
+
+    expect(screen.getByText('Start')).toBeInTheDocument()
+    expect(screen.getByText('Map centre — location unavailable')).toBeInTheDocument()
+  })
+
+  it('names the picked start point as the source of the route', () => {
+    useRoutingStore.setState({
+      currentRoute: routeWithCrossings(0, true),
+      routeStartSource: 'picked',
+    })
+    render(<BottomSheet />)
+
+    expect(screen.getByText('Picked on map')).toBeInTheDocument()
+  })
+
+  it('says nothing about the start of a loaded route', () => {
+    useRoutingStore.setState({ currentRoute: routeWithCrossings(0, true), routeStartSource: null })
+    render(<BottomSheet />)
+
+    expect(screen.queryByText('Start')).not.toBeInTheDocument()
   })
 
   it('enters destination-picking mode and clears destination coordinates when leaving it', () => {

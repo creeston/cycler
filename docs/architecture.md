@@ -170,8 +170,11 @@ Triggered by **Suggest Route**.
 
 1. `useRoute` numbers the request and sets `isCalculating`. Only the latest request may write
    to the store when it settles; an older one that finishes later is dropped.
-2. The start point comes from `navigator.geolocation` with a 3 s timeout, falling back to the map
-   viewport centre. A denied permission is a fallback, not an error.
+2. `buildRoute` resolves the start point: a point picked on the map (`startLon`/`startLat` in
+   the preferences) wins; otherwise `locateDevice` (`infrastructure/geolocation/`) asks
+   `navigator.geolocation` with a 3 s timeout, and the map viewport centre stands in when it does
+   not answer. A denied permission is a fallback, not an error. The result carries which of the
+   three was used (`StartSource`), and the sheet says so next to the metrics.
 3. `buildRoute` looks for a cached batch keyed on every routing preference, with the start at
    ~100 m precision.
 4. On a miss, `postRouteRequest` clones the lanes, barriers and preferences into the routing
@@ -212,7 +215,7 @@ silently.
 and one `<trkseg>` per contiguous lane or gap run. A namespaced extension preserves each run's
 type, repeated source-segment joins are removed, and user-visible text is XML-escaped. The Blob is
 downloaded through a temporary attached anchor with a route-specific filename. See
-[`20-gpx-hardening`](../backlog/20-gpx-hardening.md).
+[`20-gpx-hardening`](../backlog/done/20-gpx-hardening.md).
 
 ---
 
@@ -263,7 +266,8 @@ also depend on the lane data, loading new lanes clears the cache explicitly.
 | `CachedArea` | `id`, `bbox: BoundingBox`, `bikeLanes: BikeLane[]`, `fetchedAt: Date` |
 | `Route` | `id`, `segments: RouteSegment[]`, `totalDistanceMeters`, `bikeLaneDistanceMeters`, `bikeLaneCoverage`, `gapCount`, `createdAt` |
 | `RouteSegment` | `geometry: LineString`, `type: 'bike_lane' \| 'gap'`, `distanceMeters` |
-| `RoutePreferences` | `startLon`, `startLat`, `endLon?`, `endLat?`, `maxGapMeters`, `startProximityMeters`, `minDistanceMeters`, `maxDistanceMeters`, `roundTrip` |
+| `RoutePreferences` | `startLon?`, `startLat?`, `endLon?`, `endLat?`, `maxGapMeters`, `startProximityMeters`, `minDistanceMeters`, `maxDistanceMeters`, `roundTrip` |
+| `ResolvedRoutePreferences` | `RoutePreferences` with `startLon` and `startLat` required — what `findRoutes` and the worker receive |
 
 The typed `RouteSegment.type` is what makes the product's premise expressible: every route knows
 which parts of it are on dedicated infrastructure and which are not.
@@ -295,8 +299,10 @@ interface RoutingStrategy {
 `startProximityMeters` and deduplicates across all of them. Full treatment in
 [algorithms.md §5](algorithms.md).
 
-All three strategies are reachable from the preferences section. Destination coordinates can be
-set by map-pick mode, touch long-press, or desktop right-click.
+All three strategies are reachable from the preferences section. Start and destination
+coordinates can be set by map-pick mode, touch long-press, or desktop right-click; while a start is
+being chosen the gesture serves the start, otherwise the destination. An unset start means the
+device position (see §3.2).
 
 ---
 

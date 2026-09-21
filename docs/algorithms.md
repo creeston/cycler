@@ -974,7 +974,7 @@ Every tuning constant in the routing path, in one place.
 | `METERS_PER_DEGREE` | 111 195 m | `algorithms.ts` | `R · π / 180` with `R` = 6 371 000 m; shared by `approxMeters` and the index |
 | snapping precision | 5 decimals | `algorithms.ts` | ≈ 1.11 m × 0.69 m cell at 52° N |
 | `maxGapMeters` | 200 m | `DEFAULT_PREFERENCES` | User-facing gap tolerance; slider range 0–500 m |
-| `startProximityMeters` | 200 m | `DEFAULT_PREFERENCES` | Start candidate radius |
+| `startProximityMeters` | 200 m | `DEFAULT_PREFERENCES` | Start candidate radius; slider range 50–1 000 m, unrelated to the gap tolerance |
 | `minDistanceMeters` | 10 000 m | `DEFAULT_PREFERENCES` | Target range floor |
 | `maxDistanceMeters` | 30 000 m | `DEFAULT_PREFERENCES` | Target range ceiling |
 | `MAX_AREA_KM` | 50 | `useBikeLanes.ts` | Largest fetchable bbox edge |

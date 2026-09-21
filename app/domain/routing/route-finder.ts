@@ -1,7 +1,12 @@
 import type { LineString } from 'geojson'
 import type { BikeLane } from '../entities/bike-lane'
 import type { BarrierData } from '../entities/barrier'
-import type { Route, RoutePreferences, RouteSegment } from '../entities/route'
+import type {
+  ResolvedRoutePreferences,
+  Route,
+  RoutePreferences,
+  RouteSegment,
+} from '../entities/route'
 import { buildGraph, getGapStats, getMaxGapMeters, nearestNode, nodesWithinMeters } from './graph'
 import type { BikeLaneGraph, EdgeAttrs } from './graph'
 import { longestGapMeters } from '../entities/route'
@@ -581,7 +586,7 @@ export interface RoutingOptions {
  */
 export function findRoutes(
   lanes: BikeLane[],
-  preferences: RoutePreferences,
+  preferences: ResolvedRoutePreferences,
   options: RoutingOptions = {},
 ): Route[] {
   const { startLon, startLat, endLon, endLat, startProximityMeters } = preferences

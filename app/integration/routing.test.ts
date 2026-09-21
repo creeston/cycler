@@ -138,6 +138,61 @@ describe('routing integration — Warsaw overpass data', () => {
     })
   })
 
+  describe('start point', () => {
+    /** Straight-line distance from the picked start to where a route actually begins. */
+    function startOffsetMeters(route: Route): number {
+      const [lon, lat] = route.segments[0].geometry.coordinates[0]
+      return approxMeters(START_LON, START_LAT, lon, lat)
+    }
+
+    it('begins every route within the start search radius of the picked point', () => {
+      const routes = findRoutes(lanes, {
+        ...BASE_PREFERENCES,
+        minDistanceMeters: 3_000,
+        maxDistanceMeters: 6_000,
+      })
+
+      expect(routes.length).toBeGreaterThan(0)
+      routes.forEach(r => {
+        expect(startOffsetMeters(r)).toBeLessThanOrEqual(BASE_PREFERENCES.startProximityMeters)
+      })
+    })
+
+    // At the fixture start the nearest lane end is 239 m away: 300 m catches
+    // 14 candidates, 500 m catches 68, and anything under 239 m catches none.
+    it('a wider radius yields a larger batch; a narrower one still starts within it', () => {
+      const wide = findRoutes(lanes, {
+        ...BASE_PREFERENCES,
+        minDistanceMeters: 3_000,
+        maxDistanceMeters: 6_000,
+        startProximityMeters: 500,
+      })
+      const narrow = findRoutes(lanes, {
+        ...BASE_PREFERENCES,
+        minDistanceMeters: 3_000,
+        maxDistanceMeters: 6_000,
+        startProximityMeters: 300,
+      })
+
+      expect(narrow.length).toBeGreaterThan(0)
+      expect(narrow.length).toBeLessThan(wide.length)
+      narrow.forEach(r => expect(startOffsetMeters(r)).toBeLessThanOrEqual(300))
+    })
+
+    it('a 50 m radius that catches no lane end still routes from the nearest one', () => {
+      const routes = findRoutes(lanes, {
+        ...BASE_PREFERENCES,
+        minDistanceMeters: 3_000,
+        maxDistanceMeters: 6_000,
+        startProximityMeters: 50,
+      })
+
+      expect(routes.length).toBeGreaterThan(0)
+      const offsets = new Set(routes.map(r => Math.round(startOffsetMeters(r))))
+      expect(offsets).toEqual(new Set([239]))
+    })
+  })
+
   describe('determinism', () => {
     const preferences = {
       ...BASE_PREFERENCES,

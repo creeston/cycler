@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Bookmark, ChevronDown, Download, MapPin, RefreshCw, Route, Trash2, X } from 'lucide-react'
 import { Button } from '~/presentation/components/ui/Button'
 import { SegmentedControl } from '~/presentation/components/ui/SegmentedControl'
 import { Slider } from '~/presentation/components/ui/Slider'
 import { useBikeLanes } from '~/presentation/hooks/useBikeLanes'
+import { useDebouncedPreference } from '~/presentation/hooks/useDebouncedPreference'
 import { useRoute } from '~/presentation/hooks/useRoute'
 import { useSavedRoutes } from '~/presentation/hooks/useSavedRoutes'
 import { useMapStore } from '~/application/stores/map-store'
@@ -12,17 +13,36 @@ import {
   MAX_SAVED_ROUTES,
   defaultSavedRouteName,
 } from '~/application/use-cases/manage-saved-routes'
+import type { StartSource } from '~/application/use-cases/build-route'
 import { downloadGpx } from '~/infrastructure/export/gpx'
-import { isRoundTrip, longestGapMeters, wasGapToleranceWidened } from '~/domain/entities/route'
+import {
+  MAX_START_PROXIMITY_METERS,
+  MIN_START_PROXIMITY_METERS,
+  isRoundTrip,
+  longestGapMeters,
+  wasGapToleranceWidened,
+} from '~/domain/entities/route'
 import type { Route as CycleRoute, SavedRoute } from '~/domain/entities/route'
 
 type RouteMode = 'explore' | 'loop' | 'destination'
+type StartMode = 'device' | 'pick'
 
 const ROUTE_MODES: { label: string; value: RouteMode }[] = [
   { label: 'Explore', value: 'explore' },
   { label: 'Loop', value: 'loop' },
   { label: 'To destination', value: 'destination' },
 ]
+
+const START_MODES: { label: string; value: StartMode }[] = [
+  { label: 'Current location', value: 'device' },
+  { label: 'Pick on map', value: 'pick' },
+]
+
+const START_SOURCE_LABELS: Record<StartSource, string> = {
+  picked: 'Picked on map',
+  device: 'Current location',
+  'map-centre': 'Map centre — location unavailable',
+}
 
 function formatMeters(meters: number): string {
   const rounded = Math.round(meters)
@@ -120,6 +140,7 @@ export function BottomSheet() {
     cancel: cancelSuggestion,
     clear,
     currentRoute,
+    routeStartSource,
     isCalculating,
     calculationProgress,
     canIgnoreDistanceRange,
@@ -136,33 +157,39 @@ export function BottomSheet() {
   const bikeLaneCount = useMapStore(s => s.bikeLanes.length)
   const fetchError = useMapStore(s => s.fetchError)
   const routeError = useRoutingStore(s => s.routeError)
-  const maxGapMeters = useRoutingStore(s => s.preferences.maxGapMeters)
   const roundTrip = useRoutingStore(s => s.preferences.roundTrip)
+  const startLon = useRoutingStore(s => s.preferences.startLon)
+  const startLat = useRoutingStore(s => s.preferences.startLat)
   const endLon = useRoutingStore(s => s.preferences.endLon)
   const endLat = useRoutingStore(s => s.preferences.endLat)
+  const isChoosingStart = useRoutingStore(s => s.isChoosingStart)
   const isChoosingDestination = useRoutingStore(s => s.isChoosingDestination)
   const setPreferences = useRoutingStore(s => s.setPreferences)
+  const setChoosingStart = useRoutingStore(s => s.setChoosingStart)
   const setChoosingDestination = useRoutingStore(s => s.setChoosingDestination)
   const setRoute = useRoutingStore(s => s.setRoute)
   const setRouteError = useRoutingStore(s => s.setRouteError)
-  const [pendingMaxGapMeters, setPendingMaxGapMeters] = useState(maxGapMeters)
-
-  useEffect(() => setPendingMaxGapMeters(maxGapMeters), [maxGapMeters])
-
-  useEffect(() => {
-    if (pendingMaxGapMeters === maxGapMeters) return
-
-    const timeout = window.setTimeout(
-      () => setPreferences({ maxGapMeters: pendingMaxGapMeters }),
-      200,
-    )
-    return () => window.clearTimeout(timeout)
-  }, [maxGapMeters, pendingMaxGapMeters, setPreferences])
+  const [pendingMaxGapMeters, setPendingMaxGapMeters] = useDebouncedPreference('maxGapMeters')
+  const [pendingStartProximityMeters, setPendingStartProximityMeters] =
+    useDebouncedPreference('startProximityMeters')
 
   const error = fetchError ?? routeError
+  const hasStart = startLon !== undefined && startLat !== undefined
+  const startMode: StartMode = hasStart || isChoosingStart ? 'pick' : 'device'
   const hasDestination = endLon !== undefined && endLat !== undefined
   const routeMode: RouteMode =
     hasDestination || isChoosingDestination ? 'destination' : roundTrip ? 'loop' : 'explore'
+
+  function selectStartMode(mode: StartMode): void {
+    setRoute(null)
+    setRouteError(null)
+    if (mode === 'pick') {
+      setChoosingStart(true)
+      return
+    }
+    setChoosingStart(false)
+    setPreferences({ startLon: undefined, startLat: undefined })
+  }
 
   function selectRouteMode(mode: RouteMode): void {
     setRoute(null)
@@ -341,6 +368,20 @@ export function BottomSheet() {
                   <span>Route type</span>
                   <span className="rounded-full bg-orange-100 px-2 py-0.5 font-medium text-orange-600">
                     Loop
+                  </span>
+                </div>
+              )}
+              {routeStartSource && (
+                <div className="flex justify-between gap-3">
+                  <span>Start</span>
+                  <span
+                    className={
+                      routeStartSource === 'map-centre'
+                        ? 'text-right font-medium text-amber-600'
+                        : 'text-right font-medium text-gray-900'
+                    }
+                  >
+                    {START_SOURCE_LABELS[routeStartSource]}
                   </span>
                 </div>
               )}
@@ -526,16 +567,54 @@ export function BottomSheet() {
                 Clear destination
               </Button>
             )}
-            <Slider
-              label="Gap tolerance"
-              valueLabel={`${pendingMaxGapMeters} m`}
-              min={0}
-              max={500}
-              step={25}
-              value={pendingMaxGapMeters}
-              aria-valuetext={`${pendingMaxGapMeters} metres`}
-              onChange={event => setPendingMaxGapMeters(Number(event.currentTarget.value))}
-            />
+
+            <div className="space-y-3 border-t border-gray-100 pt-3">
+              <SegmentedControl
+                label="Start point"
+                options={START_MODES}
+                value={startMode}
+                onChange={selectStartMode}
+              />
+              {isChoosingStart && (
+                <p className="text-center text-xs text-emerald-700">
+                  Tap the map to choose a start point
+                </p>
+              )}
+              <Slider
+                label="Start search radius"
+                valueLabel={formatMeters(pendingStartProximityMeters)}
+                min={MIN_START_PROXIMITY_METERS}
+                max={MAX_START_PROXIMITY_METERS}
+                step={50}
+                value={pendingStartProximityMeters}
+                aria-valuetext={`${pendingStartProximityMeters} metres`}
+                onChange={event =>
+                  setPendingStartProximityMeters(Number(event.currentTarget.value))
+                }
+              />
+              <p className="text-xs text-gray-400">
+                How far from the start the router may look for a lane to begin on. Every lane end
+                within this radius starts its own set of routes.
+              </p>
+            </div>
+
+            <div className="space-y-3 border-t border-gray-100 pt-3">
+              <Slider
+                label="Gap tolerance"
+                valueLabel={`${pendingMaxGapMeters} m`}
+                min={0}
+                max={500}
+                step={25}
+                value={pendingMaxGapMeters}
+                aria-valuetext={`${pendingMaxGapMeters} metres`}
+                onChange={event => setPendingMaxGapMeters(Number(event.currentTarget.value))}
+              />
+              <p className="text-xs text-gray-400">
+                How much road without a bike lane the route may use between two lanes. This is
+                separate from the start radius: a wide radius with a small tolerance starts anywhere
+                within reach, then stays on the network once riding.
+              </p>
+            </div>
           </div>
         </details>
 

@@ -4,6 +4,7 @@ import { useMapStore } from '~/application/stores/map-store'
 import { useRoutingStore } from '~/application/stores/routing-store'
 import * as buildRouteModule from '~/application/use-cases/build-route'
 import { DEFAULT_PREFERENCES } from '~/domain/entities/route'
+import type { BuiltRoute } from '~/application/use-cases/build-route'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 import type { Route } from '~/domain/entities/route'
 import { useRoute } from './useRoute'
@@ -37,6 +38,10 @@ const candidate: Route = {
   createdAt: new Date(0),
 }
 
+function built(route: Route, startSource: BuiltRoute['startSource'] = 'device'): BuiltRoute {
+  return { route, startSource }
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   useMapStore.setState({ bikeLanes: [lane], isLoading: false })
@@ -60,6 +65,7 @@ describe('useRoute distance-range override', () => {
       new buildRouteModule.DestinationRouteOutsideRangeError(
         'The route there is only 3.2 km, below your 10 km minimum.',
         candidate,
+        'map-centre',
       ),
     )
     const { result } = renderHook(() => useRoute())
@@ -77,6 +83,7 @@ describe('useRoute distance-range override', () => {
 
     act(() => result.current.ignoreDistanceRange())
     expect(useRoutingStore.getState().currentRoute).toBe(candidate)
+    expect(useRoutingStore.getState().routeStartSource).toBe('map-centre')
     expect(useRoutingStore.getState().routeError).toBeNull()
   })
 
@@ -85,6 +92,7 @@ describe('useRoute distance-range override', () => {
       new buildRouteModule.DestinationRouteOutsideRangeError(
         'The route there is only 3.2 km, below your 10 km minimum.',
         candidate,
+        'picked',
       ),
     )
     const { result } = renderHook(() => useRoute())
@@ -102,12 +110,51 @@ describe('useRoute distance-range override', () => {
   })
 })
 
+describe('useRoute start point', () => {
+  it('hands the map centre to buildRoute and records which start was used', async () => {
+    useMapStore.setState({ viewport: { longitude: 21.03, latitude: 52.24, zoom: 13 } })
+    const buildRoute = vi
+      .spyOn(buildRouteModule, 'buildRoute')
+      .mockResolvedValue(built(candidate, 'map-centre'))
+    const { result } = renderHook(() => useRoute())
+
+    await act(async () => {
+      const suggestion = result.current.suggest()
+      await vi.runAllTimersAsync()
+      await suggestion
+    })
+
+    expect(buildRoute).toHaveBeenCalledWith(
+      [lane],
+      useRoutingStore.getState().preferences,
+      null,
+      expect.objectContaining({ mapCentre: [21.03, 52.24] }),
+    )
+    expect(useRoutingStore.getState().routeStartSource).toBe('map-centre')
+    expect(result.current.routeStartSource).toBe('map-centre')
+  })
+
+  it('forgets the start source when the route is cleared', async () => {
+    vi.spyOn(buildRouteModule, 'buildRoute').mockResolvedValue(built(candidate, 'picked'))
+    const { result } = renderHook(() => useRoute())
+
+    await act(async () => {
+      const suggestion = result.current.suggest()
+      await vi.runAllTimersAsync()
+      await suggestion
+    })
+    act(() => result.current.clear())
+
+    expect(useRoutingStore.getState().routeStartSource).toBeNull()
+  })
+})
+
 describe('useRoute computation lifecycle', () => {
   it('shows the progress the computation reports and clears it when done', async () => {
     vi.spyOn(buildRouteModule, 'buildRoute').mockImplementation(async (_l, _p, _b, options) => {
       options?.onProgress?.({ completed: 1, total: 4 })
       expect(useRoutingStore.getState().calculationProgress).toBe(0.25)
-      return candidate
+      return built(candidate)
     })
     const { result } = renderHook(() => useRoute())
 
@@ -123,8 +170,8 @@ describe('useRoute computation lifecycle', () => {
   })
 
   it('lets a second tap abandon the first and keeps only the second result', async () => {
-    const first = deferred<Route>()
-    const second = deferred<Route>()
+    const first = deferred<BuiltRoute>()
+    const second = deferred<BuiltRoute>()
     vi.spyOn(buildRouteModule, 'buildRoute')
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise)
@@ -139,7 +186,7 @@ describe('useRoute computation lifecycle', () => {
       first.reject(new buildRouteModule.RouteRequestCancelledError())
       await firstTap
       expect(useRoutingStore.getState().isCalculating).toBe(true)
-      second.resolve({ ...candidate, id: 'second' })
+      second.resolve(built({ ...candidate, id: 'second' }))
       await secondTap
     })
 
@@ -149,8 +196,8 @@ describe('useRoute computation lifecycle', () => {
   })
 
   it('ignores a stale result that settles after a newer tap', async () => {
-    const first = deferred<Route>()
-    const second = deferred<Route>()
+    const first = deferred<BuiltRoute>()
+    const second = deferred<BuiltRoute>()
     vi.spyOn(buildRouteModule, 'buildRoute')
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise)
@@ -161,9 +208,9 @@ describe('useRoute computation lifecycle', () => {
       await vi.runAllTimersAsync()
       const secondTap = result.current.suggest()
       await vi.runAllTimersAsync()
-      second.resolve({ ...candidate, id: 'second' })
+      second.resolve(built({ ...candidate, id: 'second' }))
       await secondTap
-      first.resolve({ ...candidate, id: 'first' })
+      first.resolve(built({ ...candidate, id: 'first' }))
       await firstTap
     })
 
@@ -171,7 +218,7 @@ describe('useRoute computation lifecycle', () => {
   })
 
   it('cancel abandons the computation and resets the calculating state', async () => {
-    const pending = deferred<Route>()
+    const pending = deferred<BuiltRoute>()
     vi.spyOn(buildRouteModule, 'buildRoute').mockReturnValue(pending.promise)
     const cancelRouteBuild = vi
       .spyOn(buildRouteModule, 'cancelRouteBuild')

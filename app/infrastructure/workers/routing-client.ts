@@ -3,7 +3,7 @@ import type { RouteReply, RouteRequest } from './routing-protocol'
 import type { RoutingProgress } from '~/domain/routing/route-finder'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 import type { BarrierData } from '~/domain/entities/barrier'
-import type { Route, RoutePreferences } from '~/domain/entities/route'
+import type { ResolvedRoutePreferences, Route } from '~/domain/entities/route'
 
 /** Thrown to the caller whose request was abandoned by a newer one or by cancelRouteRequest. */
 export class RouteRequestCancelledError extends Error {
@@ -43,7 +43,7 @@ let nextId = 0
  */
 export function postRouteRequest(
   lanes: BikeLane[],
-  preferences: RoutePreferences,
+  preferences: ResolvedRoutePreferences,
   options: RouteRequestOptions = {},
 ): Promise<Route[]> {
   cancelRouteRequest()
