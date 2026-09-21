@@ -295,6 +295,9 @@ interface RoutingStrategy {
 | `roundTrip: true` | `roundTripStrategy` | far points cast around the start; a path out and an edge-disjoint path back |
 | neither | `exploreStrategy` | one bounded shortest-path tree; the cheapest path to a destination in each direction |
 
+The distance range constrains Explore and Loop, which generate rides. It is deliberately ignored
+by `oneWayStrategy`, where the selected endpoints determine the route length.
+
 `executeWithCandidates` then runs the chosen strategy from every start node within
 `startProximityMeters` and deduplicates across all of them. Full treatment in
 [algorithms.md §5](algorithms.md).

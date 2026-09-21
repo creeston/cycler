@@ -32,7 +32,7 @@ const SCENARIO_SEED = 1
 
 function runScenario(sc: Scenario): Route[] {
   if (sc.endKey) {
-    return runOneWay(sc.graph, sc.startKey, sc.endKey, sc.minDist, sc.maxDist)
+    return runOneWay(sc.graph, sc.startKey, sc.endKey)
   }
   if (sc.roundTrip) {
     return runRoundTrip(sc.graph, sc.startKey, sc.minDist, sc.maxDist, SCENARIO_SEED)
@@ -57,10 +57,12 @@ function check(routes: Route[], sc: Scenario) {
   }
 
   for (const route of routes) {
-    expect(route.totalDistanceMeters, 'route shorter than minDist').toBeGreaterThanOrEqual(
-      sc.minDist,
-    )
-    expect(route.totalDistanceMeters, 'route longer than maxDist').toBeLessThanOrEqual(sc.maxDist)
+    if (!sc.endKey) {
+      expect(route.totalDistanceMeters, 'route shorter than minDist').toBeGreaterThanOrEqual(
+        sc.minDist,
+      )
+      expect(route.totalDistanceMeters, 'route longer than maxDist').toBeLessThanOrEqual(sc.maxDist)
+    }
     expect(route.bikeLaneDistanceMeters + route.gapDistanceMeters).toBeCloseTo(
       route.totalDistanceMeters,
     )
@@ -166,6 +168,16 @@ describe('graph routing scenarios', () => {
     check(runScenario(sc), sc)
   })
 
+  it('one-way-below-minimum: returns the destination route below minDist', () => {
+    const sc = loadScenario(scenario('one-way-below-minimum.dot'))
+    check(runScenario(sc), sc)
+  })
+
+  it('one-way-above-maximum: returns the destination route above maxDist', () => {
+    const sc = loadScenario(scenario('one-way-above-maximum.dot'))
+    check(runScenario(sc), sc)
+  })
+
   it('gap-penalty-detour: takes the longer all-lane route once gaps are priced', () => {
     const sc = loadScenario(scenario('gap-penalty-detour.dot'))
     check(runScenario(sc), sc)
@@ -238,7 +250,7 @@ describe('segment orientation', () => {
     const graph = buildGraph(lanes, 0)
     const sharedKey = coordKey(sharedFirst[0], sharedFirst[1])
     const departures = [coordKey(east[0], east[1]), sharedKey]
-    const [route] = runOneWay(graph, departures[0], coordKey(west[0], west[1]), 0, 1_000)
+    const [route] = runOneWay(graph, departures[0], coordKey(west[0], west[1]))
 
     expect(route?.segments).toHaveLength(2)
     route.segments.forEach((segment, index) => {

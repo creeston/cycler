@@ -1,0 +1,20 @@
+// Point-to-point routing answers the chosen destination even when the shortest
+// route is below the distance range used to generate Explore and Loop rides.
+// minDist=10000 deliberately exceeds the only path's 3 km length.
+//
+//   A --1km-- B --1km-- C --1km-- D
+//
+graph one_way_below_minimum {
+  graph [
+    description = "One-way returns the shortest route below minDist",
+    start = "A",
+    end = "D",
+    minDist = 10000,
+    maxDist = 30000,
+    expect_route = "A,B,C,D"
+  ]
+
+  A -- B [distance=1000, type=lane]
+  B -- C [distance=1000, type=lane]
+  C -- D [distance=1000, type=lane]
+}

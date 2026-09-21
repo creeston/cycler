@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BikeLane } from '~/domain/entities/bike-lane'
 import type { Route, RoutePreferences } from '~/domain/entities/route'
 import { findRoutes } from '~/domain/routing/route-finder'
-import { buildRoute, clearRouteCache, DestinationRouteOutsideRangeError } from './build-route'
+import { buildRoute, clearRouteCache } from './build-route'
 
 vi.mock('~/domain/routing/route-finder', () => ({
   findRoutes: vi.fn(),
@@ -113,31 +113,17 @@ describe('buildRoute cache', () => {
     await expect(buildRoute(lanes, preferences)).rejects.toThrow(
       'No connected bike route to that point. Try increasing gap tolerance or loading a larger area.',
     )
-    expect(findRoutesMock).toHaveBeenCalledTimes(2)
+    expect(findRoutesMock).toHaveBeenCalledOnce()
   })
 
-  it('reports the actual distance and retains a reachable route below the range', async () => {
+  it('returns a destination route without retrying against a widened distance range', async () => {
     const shortRoute = route('short', 3_200)
-    findRoutesMock.mockReturnValueOnce([]).mockReturnValueOnce([shortRoute])
+    findRoutesMock.mockReturnValue([shortRoute])
 
-    let error: unknown
-    try {
-      await buildRoute(lanes, { ...preferences, minDistanceMeters: 10_000 })
-    } catch (caught) {
-      error = caught
-    }
-
-    expect(error).toBeInstanceOf(DestinationRouteOutsideRangeError)
-    expect(error).toMatchObject({
-      message: 'The route there is only 3.2 km, below your 10 km minimum.',
-      route: shortRoute,
-      startSource: 'picked',
-    })
-    expect(findRoutesMock).toHaveBeenLastCalledWith(
-      lanes,
-      { ...preferences, minDistanceMeters: 0, maxDistanceMeters: Number.MAX_SAFE_INTEGER },
-      { barriers: undefined, onProgress: expect.any(Function) },
-    )
+    await expect(
+      buildRoute(lanes, { ...preferences, minDistanceMeters: 10_000 }),
+    ).resolves.toMatchObject({ route: shortRoute, startSource: 'picked' })
+    expect(findRoutesMock).toHaveBeenCalledOnce()
   })
 
   it('forwards progress and barriers to the search', async () => {

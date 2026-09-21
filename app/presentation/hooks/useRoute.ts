@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef } from 'react'
 import {
   buildRoute,
   cancelRouteBuild,
-  DestinationRouteOutsideRangeError,
   RouteRequestCancelledError,
 } from '~/application/use-cases/build-route'
-import type { BuiltRoute } from '~/application/use-cases/build-route'
 import { useMapStore } from '~/application/stores/map-store'
 import { useRoutingStore } from '~/application/stores/routing-store'
 import type { RoutingProgress } from '~/domain/routing/route-finder'
@@ -27,11 +25,8 @@ export function useRoute() {
   const setCalculating = useRoutingStore(s => s.setCalculating)
   const setCalculationProgress = useRoutingStore(s => s.setCalculationProgress)
   const setRouteError = useRoutingStore(s => s.setRouteError)
-  const [outsideRangeRoute, setOutsideRangeRoute] = useState<BuiltRoute | null>(null)
   // Counts suggestions; only the latest one may touch the store when it settles.
   const latestRequest = useRef(0)
-
-  useEffect(() => setOutsideRangeRoute(null), [preferences])
 
   const finish = useCallback(() => {
     setCalculating(false)
@@ -45,7 +40,6 @@ export function useRoute() {
     setCalculating(true)
     setCalculationProgress(null)
     setRouteError(null)
-    setOutsideRangeRoute(null)
     try {
       const built = await buildRoute(bikeLanes, preferences, barriers, {
         mapCentre: [viewport.longitude, viewport.latitude],
@@ -56,9 +50,6 @@ export function useRoute() {
       if (isLatest()) setRoute(built.route, built.startSource)
     } catch (err) {
       if (!isLatest() || err instanceof RouteRequestCancelledError) return
-      if (err instanceof DestinationRouteOutsideRangeError) {
-        setOutsideRangeRoute({ route: err.route, startSource: err.startSource })
-      }
       setRouteError(err instanceof Error ? err.message : 'Failed to build route')
     } finally {
       if (isLatest()) finish()
@@ -83,13 +74,6 @@ export function useRoute() {
 
   const clear = useCallback(() => setRoute(null), [setRoute])
 
-  const ignoreDistanceRange = useCallback(() => {
-    if (!outsideRangeRoute) return
-    setRoute(outsideRangeRoute.route, outsideRangeRoute.startSource)
-    setRouteError(null)
-    setOutsideRangeRoute(null)
-  }, [outsideRangeRoute, setRoute, setRouteError])
-
   return {
     suggest,
     cancel,
@@ -99,7 +83,5 @@ export function useRoute() {
     isCalculating,
     calculationProgress,
     preferences,
-    canIgnoreDistanceRange: outsideRangeRoute !== null,
-    ignoreDistanceRange,
   }
 }

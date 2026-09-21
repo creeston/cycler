@@ -143,8 +143,6 @@ export function BottomSheet() {
     routeStartSource,
     isCalculating,
     calculationProgress,
-    canIgnoreDistanceRange,
-    ignoreDistanceRange,
   } = useRoute()
   const {
     savedRoutes,
@@ -661,11 +659,6 @@ export function BottomSheet() {
         </details>
 
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{error}</p>}
-        {canIgnoreDistanceRange && routeError && (
-          <Button variant="ghost" className="w-full" onClick={ignoreDistanceRange}>
-            Ignore distance range
-          </Button>
-        )}
       </div>
     </div>
   )

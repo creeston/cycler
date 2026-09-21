@@ -729,18 +729,12 @@ Point-to-point routing is one `astar` call from each start candidate to `endKey`
 `haversineTo(endKey)` as the heuristic. `costMeters` is the edge length for a lane, 5–10× it for
 a gap and 50× that again for a gap flagged by the barrier veto (§3.3.4–3.3.5). All weights are
 non-negative and the heuristic is admissible, so the path is the cheapest — over cost, not
-distance. The distance filter below still uses real length, and `findRoutes` keeps only the
-shortest of the per-candidate results.
+distance. `findRoutes` keeps only the shortest of the per-candidate results.
 
-The result is then **filtered**, not constrained:
-
-```
-if total < minDist or total > maxDist: return null
-```
-
-A* minimises cost, so if the cheapest path is 3 km and `minDistanceMeters` is 10 km, the answer is
-"no route" — even though longer valid paths exist in abundance. A minimum-distance *constraint* is
-a different problem (it is NP-hard in general) and is not attempted.
+The distance range does not apply here. Explore and round-trip generate a ride of a requested
+length, while point-to-point answers for endpoints the rider already chose; its length is a
+reported consequence. A request for a scenic route of at least a certain length would be a
+different constrained-path problem (NP-hard in general) and is not attempted.
 
 Note also that `endKey` is resolved with `nearestNode` (§2.3), so a one-way route ends at the
 nearest lane endpoint to the tap, not at the tap itself. The snap distance is available alongside
@@ -758,8 +752,8 @@ the key for a caller that needs to warn about a distant destination.
 | Search | one bounded tree | one bounded tree + A* per bearing | A* |
 | Determinism | deterministic | deterministic for a seed | deterministic |
 | Returns to start | never | always | no |
-| `minDist` | guaranteed | guaranteed | filter only |
-| `maxDist` | guaranteed | guaranteed | filter only |
+| `minDist` | guaranteed | guaranteed | ignored |
+| `maxDist` | guaranteed | guaranteed | ignored |
 | Prefers lanes | by cost | by cost | by cost |
 | Avoids flagged gaps | 50× cost, then filtered out while a clean route exists | same | 50× cost |
 | Routes per candidate | ≤ `MAX_EXPLORE_ROUTES` | ≤ `N_BEARINGS` | 1 |

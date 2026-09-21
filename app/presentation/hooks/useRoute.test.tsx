@@ -59,57 +59,6 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('useRoute distance-range override', () => {
-  it('offers and accepts the unrestricted destination route', async () => {
-    vi.spyOn(buildRouteModule, 'buildRoute').mockRejectedValue(
-      new buildRouteModule.DestinationRouteOutsideRangeError(
-        'The route there is only 3.2 km, below your 10 km minimum.',
-        candidate,
-        'map-centre',
-      ),
-    )
-    const { result } = renderHook(() => useRoute())
-
-    await act(async () => {
-      const suggestion = result.current.suggest()
-      await vi.runAllTimersAsync()
-      await suggestion
-    })
-
-    expect(result.current.canIgnoreDistanceRange).toBe(true)
-    expect(useRoutingStore.getState().routeError).toBe(
-      'The route there is only 3.2 km, below your 10 km minimum.',
-    )
-
-    act(() => result.current.ignoreDistanceRange())
-    expect(useRoutingStore.getState().currentRoute).toBe(candidate)
-    expect(useRoutingStore.getState().routeStartSource).toBe('map-centre')
-    expect(useRoutingStore.getState().routeError).toBeNull()
-  })
-
-  it('discards an override candidate when route preferences change', async () => {
-    vi.spyOn(buildRouteModule, 'buildRoute').mockRejectedValue(
-      new buildRouteModule.DestinationRouteOutsideRangeError(
-        'The route there is only 3.2 km, below your 10 km minimum.',
-        candidate,
-        'picked',
-      ),
-    )
-    const { result } = renderHook(() => useRoute())
-
-    await act(async () => {
-      const suggestion = result.current.suggest()
-      await vi.runAllTimersAsync()
-      await suggestion
-    })
-    expect(result.current.canIgnoreDistanceRange).toBe(true)
-
-    act(() => useRoutingStore.getState().setPreferences({ maxGapMeters: 300 }))
-
-    expect(result.current.canIgnoreDistanceRange).toBe(false)
-  })
-})
-
 describe('useRoute start point', () => {
   it('hands the map centre to buildRoute and records which start was used', async () => {
     useMapStore.setState({ viewport: { longitude: 21.03, latitude: 52.24, zoom: 13 } })

@@ -190,24 +190,18 @@ function totalMeters(segments: RouteSegment[]): number {
 /**
  * Finds the cheapest path from startKey to endKey with A*, weighted by
  * costMeters and guided by the great-circle distance to the end (see
- * haversineTo for why that stays admissible with gap penalties). The
- * distance bounds are checked against real length, not cost.
- * Returns null when no path exists or the path falls outside [minDist, maxDist].
+ * haversineTo for why that stays admissible with gap penalties). Point-to-point
+ * distance is determined by the chosen endpoints, so generated-ride distance
+ * preferences do not constrain this search.
  */
 function findShortestPath(
   graph: BikeLaneGraph,
   startKey: string,
   endKey: string,
-  minDist: number,
-  maxDist: number,
 ): RouteSegment[] | null {
   const { path } = astar(graph, startKey, endKey, { heuristic: haversineTo(graph, endKey) })
   if (!path) return null
-
-  const segments = pathSegments(graph, path)
-  const total = totalMeters(segments)
-  if (total < minDist || total > maxDist) return null
-  return segments
+  return pathSegments(graph, path)
 }
 
 /**
@@ -413,16 +407,10 @@ export function runRoundTrip(
 
 /**
  * Finds the shortest one-way route from startKey to endKey with A*.
- * Returns an array with one route, or empty if no path exists within [minDist, maxDist].
+ * Returns an array with one route, or empty if no path exists.
  */
-export function runOneWay(
-  graph: BikeLaneGraph,
-  startKey: string,
-  endKey: string,
-  minDist: number,
-  maxDist: number,
-): Route[] {
-  const segments = findShortestPath(graph, startKey, endKey, minDist, maxDist)
+export function runOneWay(graph: BikeLaneGraph, startKey: string, endKey: string): Route[] {
+  const segments = findShortestPath(graph, startKey, endKey)
   if (!segments) return []
   return toRoutes(graph, [segments])
 }
@@ -443,11 +431,11 @@ function roundTripStrategy(minDist: number, maxDist: number, seed: number): Rout
   }
 }
 
-function oneWayStrategy(endKey: string, minDist: number, maxDist: number): RoutingStrategy {
+function oneWayStrategy(endKey: string): RoutingStrategy {
   return {
     findRoutes: (graph, startKey) => {
       if (startKey === endKey) return []
-      return runOneWay(graph, startKey, endKey, minDist, maxDist)
+      return runOneWay(graph, startKey, endKey)
     },
   }
 }
@@ -457,8 +445,8 @@ function buildStrategy(
   seed: number,
   endKey?: string,
 ): RoutingStrategy {
+  if (endKey) return oneWayStrategy(endKey)
   const { minDistanceMeters: min, maxDistanceMeters: max } = preferences
-  if (endKey) return oneWayStrategy(endKey, min, max)
   if (preferences.roundTrip) return roundTripStrategy(min, max, seed)
   return exploreStrategy(min, max)
 }

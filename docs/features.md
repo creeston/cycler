@@ -201,12 +201,12 @@ is silent ([`18`](../backlog/done/18-overpass-resilience.md)).
 naming the source used — *Current location*, *Picked on map*, or *Map centre — location
 unavailable*. A green marker sits where the route actually begins.
 **Failure** Explore mode shows the generic no-route message. Loop mode suggests a shorter
-distance, a larger gap tolerance, or switching back to Explore. Destination mode distinguishes a
-disconnected graph from a reachable route outside the distance range; the latter can be accepted
-with **Ignore distance range**.
+distance, a larger gap tolerance, or switching back to Explore. Destination mode reports when no
+connected bike route reaches the selected point; the distance range does not gate this mode.
 
-**Current constraints** Distance remains fixed at 10–30 km. Gap tolerance, start search radius,
-start point and routing mode are user-selectable and persisted.
+**Current constraints** Generated rides remain fixed at 10–30 km; point-to-point routes ignore
+that range. Gap tolerance, start search radius, start point and routing mode are user-selectable
+and persisted.
 
 ---
 

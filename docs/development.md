@@ -180,8 +180,8 @@ Complete reference — everything `loadScenario` understands.
 | `description` | string | `""` | One-line summary, shown nowhere but read by everyone |
 | `start` | node name | first edge's left node | Where routing begins |
 | `end` | node name | — | **When set, switches to one-way routing** (A*) instead of explore |
-| `minDist` | number | `100` | Minimum acceptable route length, metres |
-| `maxDist` | number | `100000` | Maximum acceptable route length, metres |
+| `minDist` | number | `100` | Minimum acceptable generated-route length; ignored when `end` is set |
+| `maxDist` | number | `100000` | Maximum acceptable generated-route length; ignored when `end` is set |
 | `roundTrip` | `"true"` | false | Use the round-trip strategy. Ignored when `end` is set |
 
 Round trips take a seed; the test runner pins `SCENARIO_SEED = 1` for every scenario.
