@@ -29,7 +29,7 @@ graph LR
     end
 
     subgraph store["browser storage"]
-        IDB[("IndexedDB<br/>fetched areas · 7-day expiry")]
+        IDB[("IndexedDB<br/>fetched areas · saved routes")]
         LS[("localStorage<br/>viewport · last route")]
     end
 
@@ -87,9 +87,9 @@ graph TD
 
 | Layer | Modules | Depends on |
 |---|---|---|
-| `domain` | `entities/` (BikeLane, Barrier, Route, RoutePreferences, CachedArea) · `routing/` (graph, spatial-index, route-finder, search, random, algorithms, barriers) · `mappers/` (osm-to-domain, osm-to-barriers, geojson-from-domain) | nothing in-app; only `geojson` types, `graphology`, `@turf/turf` |
-| `infrastructure` | `osm/` (overpass-client, queries) · `cache/` (db, area-cache) · `export/` (gpx) · `workers/` (routing.worker, routing-client, routing-protocol) | `domain/entities`, and `domain/routing` from the worker |
-| `application` | `use-cases/` (fetchArea, loadCachedLanes, buildRoute) · `stores/` (map-store, routing-store) | `domain`, `infrastructure` |
+| `domain` | `entities/` (BikeLane, Barrier, Route, SavedRoute, RoutePreferences, CachedArea) · `routing/` (graph, spatial-index, route-finder, search, random, algorithms, barriers) · `mappers/` (osm-to-domain, osm-to-barriers, geojson-from-domain) | nothing in-app; only `geojson` types, `graphology`, `@turf/turf` |
+| `infrastructure` | `osm/` (overpass-client, queries) · `cache/` (db, area-cache, route-store) · `export/` (gpx) · `workers/` (routing.worker, routing-client, routing-protocol) | `domain/entities`, and `domain/routing` from the worker |
+| `application` | `use-cases/` (fetchArea, loadCachedLanes, buildRoute, manageSavedRoutes) · `stores/` (map-store, routing-store) | `domain`, `infrastructure` |
 | `presentation` | `components/map` · `components/layout` · `components/ui` · `hooks/` | `application`, plus domain types and view mappers |
 
 ### Deliberate shortcut
@@ -194,7 +194,19 @@ constructed, or the worker script fails to load, the client runs `findRoutes` on
 thread after one `setTimeout(0)` yield so the spinner paints — the same code path the tests take
 under jsdom.
 
-### 3.3 Exporting GPX
+### 3.3 Saving and restoring routes
+
+The bookmark action asks for a name, defaulting to distance, route shape and date, then
+`manage-saved-routes` stores the complete route in IndexedDB. The `routes` store is keyed by the
+route id and indexed by `savedAt`, so the bottom sheet restores its newest-first list on mount.
+Selecting an entry puts that route back into `routing-store`; export reads the saved route
+directly, without changing the active route. Deletion is confirmed first.
+
+At most 50 distinct routes may be saved. Saving the same route again updates its name and save
+date; saving a new one at the limit is refused with an actionable message. Nothing is evicted
+silently.
+
+### 3.4 Exporting GPX
 
 `BottomSheet` calls `downloadGpx(route)` directly. The exporter writes GPX 1.1 metadata, bounds,
 and one `<trkseg>` per contiguous lane or gap run. A namespaced extension preserves each run's
@@ -214,6 +226,7 @@ their state to `localStorage`.
 | `viewport` | localStorage (`cycle-map-viewport`) | yes | Restores the last map position |
 | `bbox`, `isLoading`, `fetchError`, `lastFetchedAt` | memory | no | Excluded from `partialize` |
 | `areas` | IndexedDB (`cycle-app` → `areas`) | yes, those near the view | Areas older than 7 days are deleted on startup and re-fetched on access |
+| saved routes | IndexedDB (`cycle-app` → `routes`) | yes | Complete named routes, newest first, capped at 50 |
 | `bikeLanes` | derived from `areas` | — | Recomputed once per area change, not per read |
 | `barriers` | derived from `areas` | — | Null unless **every** held area has them, so a partly unchecked set is never reported as checked |
 | `currentRoute` | localStorage (`cycle-routing`) | yes, but degraded | `createdAt` rehydrates as a `string`, not a `Date` — [`15`](../backlog/15-persisted-route-rehydration.md) |
@@ -226,11 +239,13 @@ IndexedDB is not always available. A private window, blocked site data or a disa
 make `indexedDB.open()` reject — Firefox with "The user denied permission to access the
 database." A write can also fail after a successful open, on quota or eviction.
 
-`tryGetDb` resolves to `null` in that case instead of throwing, and every `area-cache` function
-degrades to "no cache": `saveArea` returns `false`, `loadArea` returns `undefined`,
-`loadAllAreas` returns `[]`. The app then refetches every area from Overpass and keeps nothing
-between sessions, but loading lanes and building routes still work. The refusal is remembered for
-the session, so the browser is asked once per page load and one warning reaches the console.
+`tryGetDb` resolves to `null` in that case instead of throwing. Every `area-cache` function
+degrades to "no cache": `saveArea` returns `false`, `loadArea` returns `undefined`, and
+`loadAllAreas` returns `[]`. Route reads likewise return nothing; save and delete actions fail
+with a visible message instead of claiming success. The app then refetches every area from
+Overpass and keeps nothing in IndexedDB between sessions, but loading lanes and building routes
+still work. The refusal is remembered for the session, so the browser is asked once per page load
+and one warning reaches the console.
 
 The route batch cache is deliberately mutable module state, so **New Route** is instant. It is
 an LRU bounded to 20 entries and keyed on every routing preference. Start coordinates are rounded

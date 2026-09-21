@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, MapPin, Route, Download, RefreshCw, Trash2, X } from 'lucide-react'
+import { Bookmark, ChevronDown, Download, MapPin, RefreshCw, Route, Trash2, X } from 'lucide-react'
 import { Button } from '~/presentation/components/ui/Button'
 import { SegmentedControl } from '~/presentation/components/ui/SegmentedControl'
 import { Slider } from '~/presentation/components/ui/Slider'
 import { useBikeLanes } from '~/presentation/hooks/useBikeLanes'
 import { useRoute } from '~/presentation/hooks/useRoute'
+import { useSavedRoutes } from '~/presentation/hooks/useSavedRoutes'
 import { useMapStore } from '~/application/stores/map-store'
 import { useRoutingStore } from '~/application/stores/routing-store'
+import {
+  MAX_SAVED_ROUTES,
+  defaultSavedRouteName,
+} from '~/application/use-cases/manage-saved-routes'
 import { downloadGpx } from '~/infrastructure/export/gpx'
 import { isRoundTrip, longestGapMeters, wasGapToleranceWidened } from '~/domain/entities/route'
-import type { Route as CycleRoute } from '~/domain/entities/route'
+import type { Route as CycleRoute, SavedRoute } from '~/domain/entities/route'
 
 type RouteMode = 'explore' | 'loop' | 'destination'
 
@@ -31,6 +36,24 @@ function gapSummary(route: CycleRoute): string {
   const distance =
     route.gapDistanceMeters ?? route.totalDistanceMeters - route.bikeLaneDistanceMeters
   return `${route.gapCount} ${noun} · ${formatMeters(Math.max(0, distance))}`
+}
+
+function savedDateLabel(date: Date): string {
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ]
+  return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`
 }
 
 /** What the route metrics say about barrier crossings, in the rider's terms. */
@@ -77,6 +100,7 @@ function laneDataLabel(
 
 export function BottomSheet() {
   const [expanded, setExpanded] = useState(true)
+  const [savedRouteNotice, setSavedRouteNotice] = useState<string | null>(null)
 
   const {
     fetch: fetchLanes,
@@ -101,6 +125,13 @@ export function BottomSheet() {
     canIgnoreDistanceRange,
     ignoreDistanceRange,
   } = useRoute()
+  const {
+    savedRoutes,
+    isLoadingSavedRoutes,
+    savedRoutesError,
+    save: saveCurrentRoute,
+    remove: removeSavedRoute,
+  } = useSavedRoutes()
 
   const bikeLaneCount = useMapStore(s => s.bikeLanes.length)
   const fetchError = useMapStore(s => s.fetchError)
@@ -147,6 +178,26 @@ export function BottomSheet() {
       endLat: undefined,
       roundTrip: mode === 'loop',
     })
+  }
+
+  async function nameAndSaveRoute(route: CycleRoute): Promise<void> {
+    const suggestedName = defaultSavedRouteName(route)
+    const name = window.prompt('Name this saved route', suggestedName)
+    if (name === null) return
+
+    const saved = await saveCurrentRoute(route, name)
+    setSavedRouteNotice(saved ? `Saved “${saved.name}”.` : null)
+  }
+
+  function loadSavedRoute(route: SavedRoute): void {
+    setRoute(route)
+    setRouteError(null)
+    setSavedRouteNotice(`Loaded “${route.name}”.`)
+  }
+
+  async function confirmAndDeleteRoute(route: SavedRoute): Promise<void> {
+    if (!window.confirm(`Delete “${route.name}” from saved routes?`)) return
+    if (await removeSavedRoute(route.id)) setSavedRouteNotice(`Deleted “${route.name}”.`)
   }
 
   async function confirmAndClearCache(): Promise<void> {
@@ -335,23 +386,114 @@ export function BottomSheet() {
               ) : (
                 <Button
                   variant="ghost"
+                  onClick={clear}
+                  className="px-3 text-gray-400 hover:text-gray-700"
+                  aria-label="Clear route"
+                >
+                  <X size={16} />
+                </Button>
+              )}
+            </div>
+            {!isCalculating && (
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  className="flex-1"
+                  onClick={() => void nameAndSaveRoute(currentRoute)}
+                >
+                  <Bookmark size={15} />
+                  Save
+                </Button>
+                <Button
+                  variant="ghost"
                   className="flex-1"
                   onClick={() => downloadGpx(currentRoute)}
                 >
                   <Download size={15} />
                   Export GPX
                 </Button>
-              )}
-              <Button
-                variant="ghost"
-                onClick={clear}
-                className="px-3 text-gray-400 hover:text-gray-700"
-                aria-label="Clear route"
-              >
-                <X size={16} />
-              </Button>
-            </div>
+              </div>
+            )}
           </>
+        )}
+
+        <details className="group rounded-xl border border-gray-200 bg-white/70">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 text-sm font-semibold text-gray-700 [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-2">
+              <Bookmark size={15} />
+              Saved routes
+              {!isLoadingSavedRoutes && (
+                <span className="font-normal text-gray-400">{savedRoutes.length}</span>
+              )}
+            </span>
+            <ChevronDown
+              aria-hidden="true"
+              className="transition-transform group-open:rotate-180"
+              size={16}
+            />
+          </summary>
+          <div className="space-y-3 border-t border-gray-100 px-3 py-3">
+            {isLoadingSavedRoutes ? (
+              <p className="px-1 text-xs text-gray-400">Loading saved routes…</p>
+            ) : savedRoutes.length === 0 ? (
+              <p className="px-1 text-xs text-gray-400">
+                Routes you bookmark will stay on this device.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {savedRoutes.map(route => (
+                  <li key={route.id} className="rounded-lg border border-gray-100 bg-white p-2">
+                    <button
+                      type="button"
+                      className="w-full rounded-md px-1 py-1 text-left hover:bg-gray-50"
+                      onClick={() => loadSavedRoute(route)}
+                      aria-label={`Load ${route.name}`}
+                    >
+                      <span className="block truncate text-sm font-medium text-gray-800">
+                        {route.name}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-gray-400">
+                        {(route.totalDistanceMeters / 1_000).toFixed(1)} km ·{' '}
+                        {Math.round(route.bikeLaneCoverage * 100)}% bike lanes ·{' '}
+                        {savedDateLabel(route.savedAt)}
+                      </span>
+                    </button>
+                    <div className="mt-1 flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        className="px-3 py-2"
+                        onClick={() => downloadGpx(route, undefined, route.name)}
+                        aria-label={`Export ${route.name}`}
+                      >
+                        <Download size={14} />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="px-3 py-2 text-red-600 hover:text-red-700"
+                        onClick={() => void confirmAndDeleteRoute(route)}
+                        aria-label={`Delete ${route.name}`}
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="px-1 text-xs text-gray-400">
+              {savedRoutes.length}/{MAX_SAVED_ROUTES} saved. At the limit, delete one before saving
+              another.
+            </p>
+          </div>
+        </details>
+
+        {savedRouteNotice && (
+          <p className="rounded-lg bg-green-50 px-3 py-2 text-xs text-green-700">
+            {savedRouteNotice}
+          </p>
+        )}
+        {savedRoutesError && (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{savedRoutesError}</p>
         )}
 
         <details className="group rounded-xl border border-gray-200 bg-white/70">

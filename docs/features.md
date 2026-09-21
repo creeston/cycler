@@ -69,7 +69,7 @@ default start point, GPX as the exit route, and a bottom sheet you can work one-
 | Distance range control | **Not started** — fixed at 10–30 km | [`05`](../backlog/05-route-preferences-ui.md) |
 | Surface preference | **Not started** — `surface` parsed, never used | [`05`](../backlog/05-route-preferences-ui.md) |
 | Address search (geocoding) | **Not started** | [`07`](../backlog/07-nominatim-geocoder.md) |
-| Saved routes | **Not started** — one route persisted, no list | [`08`](../backlog/08-saved-routes.md) |
+| Saved routes | **Shipped** — named local list, load, delete and export | [`08`](../backlog/done/08-saved-routes.md) |
 | Turn-by-turn navigation | **Out of scope** | — |
 | Elevation profile | **Out of scope** | — |
 
@@ -93,8 +93,11 @@ Controls, in full — this is the entire interactive surface of the application:
 | **Refresh** | lanes loaded, not loading, bbox ≤ 50×50 km | Bypasses the cache and queries Overpass |
 | **Suggest Route** | lanes loaded, no current route | Builds and displays a route |
 | **New Route** | a route exists | Serves the next candidate from the batch |
+| **Save** | a route exists | Names and stores the complete route locally |
 | **Export GPX** | a route exists | Downloads `route.gpx` |
 | **✕** | a route exists | Clears the route |
+| Saved route | saved routes exist | Loads it as the current route |
+| Saved-route export / delete | saved routes exist | Exports without loading, or confirms and deletes |
 | Explore / Loop / To destination | always | Selects the routing mode |
 | Gap tolerance | always | Sets the persisted maximum gap from 0–500 m |
 | Map tap | destination-picking mode | Sets the destination |
@@ -227,7 +230,22 @@ break the XML, and the downloaded filename includes the distance and route date.
 
 ---
 
-### UC-5 — Clear the route
+### UC-5 — Save and revisit routes
+
+**Actor** Cyclist · **Trigger** Tap *Save*
+
+The app proposes a name such as `14.2 km loop — 7 Sep`; the cyclist can replace it. The complete
+route, including every segment coordinate and its original creation time, is stored locally.
+Saved routes are listed newest-first with name, distance, bike-lane coverage and save date.
+Selecting one redraws it exactly; adjacent actions export it without loading or delete it after
+confirmation. The list returns after a hard reload.
+
+The list holds at most 50 distinct routes. At the limit the app refuses a new save and asks the
+cyclist to delete one; it never silently evicts a route. Re-saving the same route updates it.
+
+---
+
+### UC-6 — Clear the route
 
 **Actor** Cyclist · **Trigger** Tap *✕*
 
@@ -237,7 +255,7 @@ still instant.
 
 ---
 
-### UC-6 — Return visit
+### UC-7 — Return visit
 
 **Actor** Returning cyclist · **Trigger** Open the app
 
@@ -246,7 +264,8 @@ still instant.
    intersecting a one-screen margin around the current view; other cities remain stored without
    being deserialised.
 3. The last route is rehydrated from `localStorage` and redrawn.
-4. If location permission was already granted, the map flies to the current position.
+4. Saved routes are loaded newest-first from IndexedDB.
+5. If location permission was already granted, the map flies to the current position.
 
 The app is fully usable offline in a previously fetched area — the only network dependency left
 is the base map tiles.
@@ -256,7 +275,7 @@ is the base map tiles.
 
 ---
 
-### UC-7 — Locate me
+### UC-8 — Locate me
 
 **Actor** Cyclist · **Trigger** App load, or tap the MapLibre locate button
 
@@ -275,6 +294,7 @@ in the normal way.
 | Overpass query timeout | 30 s | `queries.ts` (`[timeout:30]`) |
 | Geolocation timeout | 3 s, 60 s max age | `useRoute` |
 | Cache lifetime | 7 days | `area-cache.ts`, `useBikeLanes.ts` |
+| Saved routes | 50 distinct routes | `manage-saved-routes.ts` |
 | Route length | 10–30 km | `DEFAULT_PREFERENCES` |
 | Gap tolerance | 200 m, silently widened to 1 000 m | `DEFAULT_PREFERENCES`, `route-finder.ts` |
 | Start search radius | 200 m | `DEFAULT_PREFERENCES` |

@@ -154,8 +154,8 @@ Both are free, unauthenticated and rate-limited. Treat them as donated infrastru
 ### Cached data
 
 Fetched areas live in IndexedDB (`cycle-app`, store `areas`), keyed by bbox and expiring after
-7 days. Map viewport and the current route live in `localStorage`. Clearing site data resets the
-app completely; nothing is stored anywhere else.
+7 days. Up to 50 named routes live in its `routes` store. Map viewport and the current route live
+in `localStorage`. Clearing site data resets the app completely; nothing is stored anywhere else.
 
 ---
 

@@ -1,15 +1,21 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useRoutingStore } from '~/application/stores/routing-store'
 import { useMapStore } from '~/application/stores/map-store'
 import { DEFAULT_PREFERENCES } from '~/domain/entities/route'
-import type { Route, RoutePreferences } from '~/domain/entities/route'
+import type { Route, RoutePreferences, SavedRoute } from '~/domain/entities/route'
 import { BottomSheet } from './BottomSheet'
 
 const clearStoredAreas = vi.fn()
 const fetchLanes = vi.fn()
 const cancelFetch = vi.fn()
 let bikeLanesAreLoading = false
+const savedRouteMocks = vi.hoisted(() => ({
+  savedRoutes: [] as SavedRoute[],
+  saveCurrentRoute: vi.fn(),
+  removeSavedRoute: vi.fn(),
+  downloadGpx: vi.fn(),
+}))
 
 vi.mock('~/presentation/hooks/useBikeLanes', () => ({
   useBikeLanes: () => ({
@@ -27,10 +33,25 @@ vi.mock('~/presentation/hooks/useBikeLanes', () => ({
   }),
 }))
 
+vi.mock('~/presentation/hooks/useSavedRoutes', () => ({
+  useSavedRoutes: () => ({
+    savedRoutes: savedRouteMocks.savedRoutes,
+    isLoadingSavedRoutes: false,
+    savedRoutesError: null,
+    save: savedRouteMocks.saveCurrentRoute,
+    remove: savedRouteMocks.removeSavedRoute,
+  }),
+}))
+
+vi.mock('~/infrastructure/export/gpx', () => ({ downloadGpx: savedRouteMocks.downloadGpx }))
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.clearAllMocks()
   bikeLanesAreLoading = false
+  savedRouteMocks.savedRoutes = []
+  savedRouteMocks.saveCurrentRoute.mockResolvedValue(null)
+  savedRouteMocks.removeSavedRoute.mockResolvedValue(true)
   localStorage.clear()
   useRoutingStore.setState({
     currentRoute: null,
@@ -175,6 +196,47 @@ describe('BottomSheet preferences', () => {
 
     expect(screen.getByText('Route type')).toBeInTheDocument()
     expect(screen.getByText('Loop', { selector: 'span' })).toBeInTheDocument()
+  })
+
+  it('names and saves the current route from the action beside export', async () => {
+    vi.setSystemTime(new Date(2026, 0, 1))
+    const currentRoute = routeWithCrossings(0, true)
+    const saved = savedRoute('Riverside loop', currentRoute)
+    useRoutingStore.setState({ currentRoute })
+    vi.spyOn(window, 'prompt').mockReturnValue('Riverside loop')
+    savedRouteMocks.saveCurrentRoute.mockResolvedValue(saved)
+
+    render(<BottomSheet />)
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Save' })))
+
+    expect(window.prompt).toHaveBeenCalledWith('Name this saved route', '1.0 km route — 1 Jan')
+    expect(savedRouteMocks.saveCurrentRoute).toHaveBeenCalledWith(currentRoute, 'Riverside loop')
+    expect(screen.getByText('Saved “Riverside loop”.')).toBeInTheDocument()
+  })
+
+  it('loads, exports, and deletes a route from the saved-routes list', async () => {
+    const stored = savedRoute('Riverside loop', routeWithCrossings(0, true))
+    savedRouteMocks.savedRoutes = [stored]
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(<BottomSheet />)
+    fireEvent.click(screen.getByText('Saved routes'))
+
+    const savedItem = screen.getByRole('listitem')
+    expect(within(savedItem).getByText('Riverside loop')).toBeInTheDocument()
+    expect(within(savedItem).getByText('1.0 km · 100% bike lanes · 7 Sep 2026')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load Riverside loop' }))
+    expect(useRoutingStore.getState().currentRoute).toBe(stored)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export Riverside loop' }))
+    expect(savedRouteMocks.downloadGpx).toHaveBeenCalledWith(stored, undefined, 'Riverside loop')
+
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: 'Delete Riverside loop' })),
+    )
+    expect(window.confirm).toHaveBeenCalledWith('Delete “Riverside loop” from saved routes?')
+    expect(savedRouteMocks.removeSavedRoute).toHaveBeenCalledWith(stored.id)
   })
 
   it('shows the road-gap count, total distance, and longest gap', () => {
@@ -323,5 +385,13 @@ function segment(type: 'bike_lane' | 'gap', distanceMeters: number, lon: number)
     },
     type,
     distanceMeters,
+  }
+}
+
+function savedRoute(name: string, route: Route): SavedRoute {
+  return {
+    ...route,
+    name,
+    savedAt: new Date(2026, 8, 7),
   }
 }

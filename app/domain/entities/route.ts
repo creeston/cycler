@@ -40,6 +40,11 @@ export interface Route {
   createdAt: Date
 }
 
+export interface SavedRoute extends Route {
+  name: string
+  savedAt: Date
+}
+
 export function wasGapToleranceWidened(route: Route): boolean {
   return route.appliedGapMeters > route.requestedGapMeters
 }
