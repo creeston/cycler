@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { METERS_PER_DEGREE, coordKey } from './algorithms'
+import { METERS_PER_DEGREE, approxMeters, coordKey } from './algorithms'
 import {
   BARRIER_COST_MULTIPLIER,
   GAP_PENALTY_FACTOR,
@@ -489,7 +489,7 @@ describe('buildGraph barrier veto', () => {
 // ── nearestNode ───────────────────────────────────────────────────────────────
 
 describe('nearestNode', () => {
-  it('returns the key of the closest node', () => {
+  it('returns the closest node key and snap distance at the equator', () => {
     const lanes = [
       makeLane('a', [
         [0, 0],
@@ -497,9 +497,10 @@ describe('nearestNode', () => {
       ]),
     ]
     const g = buildGraph(lanes, 0)
-    const key = nearestNode(g, 0.001, 0.001)
+    const nearest = nearestNode(g, 0.001, 0.001)
     // Nearest to (0.001, 0.001) should be the node at (0,0)
-    expect(g.getNodeAttribute(key!, 'lon')).toBe(0)
+    expect(g.getNodeAttribute(nearest!.key, 'lon')).toBe(0)
+    expect(nearest!.distanceMeters).toBeCloseTo(approxMeters(0.001, 0.001, 0, 0), 9)
   })
 
   it('returns null for an empty graph', () => {
@@ -523,7 +524,10 @@ describe('nearestNode', () => {
       ]),
     ]
     const g = buildGraph(lanes, 0)
-    expect(nearestNode(g, 21, 52)).toBe(coordKey(21 + east, 52))
+    expect(nearestNode(g, 21, 52)).toEqual({
+      key: coordKey(21 + east, 52),
+      distanceMeters: expect.closeTo(90, 6),
+    })
   })
 })
 

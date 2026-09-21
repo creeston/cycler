@@ -83,6 +83,11 @@ export interface NodeIndex {
   points: PointIndex
 }
 
+export interface NearestNodeResult {
+  key: string
+  distanceMeters: number
+}
+
 export interface GraphAttrs {
   laneStats?: LaneStats
   gapStats?: GapStats
@@ -705,15 +710,19 @@ export function getGapStats(graph: BikeLaneGraph): GapStats {
 }
 
 /**
- * Returns the key of the graph node closest to the given coordinate, or null
- * for an empty graph. Distance is approxMeters through the node index, the
- * same measure nodesWithinMeters uses, so the two cannot disagree about
+ * Returns the graph node closest to the given coordinate and its snap distance,
+ * or null for an empty graph. Distance is approxMeters through the node index,
+ * the same measure nodesWithinMeters uses, so the two cannot disagree about
  * which node is nearest.
  */
-export function nearestNode(graph: BikeLaneGraph, lon: number, lat: number): string | null {
+export function nearestNode(
+  graph: BikeLaneGraph,
+  lon: number,
+  lat: number,
+): NearestNodeResult | null {
   const index = nodeIndexOf(graph)
   const nearest = nearestPoint(index.points, lon, lat)
-  return nearest ? index.keys[nearest.index] : null
+  return nearest ? { key: index.keys[nearest.index], distanceMeters: nearest.distanceMeters } : null
 }
 
 /**

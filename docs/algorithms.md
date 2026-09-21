@@ -107,8 +107,8 @@ the approximation is effectively exact.
 [`16`](../backlog/done/16-spatial-index.md) `nearestNode` compared squared degree deltas with no
 `cos φ` correction, which over-weighted east–west displacement by `1/cos φ` — 1.62× at 52° N —
 and on the Warsaw fixture picked a different node for 46 of 200 probe points near lane
-endpoints. [`13`](../backlog/13-nearest-node-metric.md) keeps what is left of that task: a
-return value that says how far the snap was.
+endpoints. `nearestNode` returns both that node's key and the measured snap distance, so callers
+can distinguish a close match from a distant fallback.
 
 ---
 
@@ -575,8 +575,8 @@ S = \{\, u \in V : \text{approxMeters}(u, (\lambda,\varphi)) \le r \,\}
 $$
 
 through the node index (§3.4), with `r = startProximityMeters` (default 200 m), in node order.
-When `S = ∅` it falls back to `{ nearestNode(G, λ, φ) }`, so `S` is non-empty for any non-empty
-graph.
+When `S = ∅` it falls back to `{ nearestNode(G, λ, φ).key }`, so `S` is non-empty for any
+non-empty graph.
 
 The routing strategy is then run independently from **every** `u ∈ S`. Standing at a junction of
 four bike paths therefore produces four families of routes rather than one — the single biggest
@@ -743,7 +743,8 @@ A* minimises cost, so if the cheapest path is 3 km and `minDistanceMeters` is 10
 a different problem (it is NP-hard in general) and is not attempted.
 
 Note also that `endKey` is resolved with `nearestNode` (§2.3), so a one-way route ends at the
-nearest lane endpoint to the tap, not at the tap itself.
+nearest lane endpoint to the tap, not at the tap itself. The snap distance is available alongside
+the key for a caller that needs to warn about a distant destination.
 
 > **Naming trap.** The scenarios `one-way-chain.dot` and `one-way-branching.dot` test
 > *point-to-point* routing. They have nothing to do with OSM `oneway=yes`. The graph is

@@ -275,7 +275,7 @@ function farPointLoops(
 
   for (let i = 0; i < N_BEARINGS; i++) {
     const [lon, lat] = destinationPoint(start.lon, start.lat, farMeters, bearingOffset + i * step)
-    const farKey = nearestNode(graph, lon, lat)
+    const farKey = nearestNode(graph, lon, lat)?.key
     if (!farKey || farKey === startKey || tried.has(farKey)) continue
     tried.add(farKey)
 
@@ -594,7 +594,7 @@ export function findRoutes(
 
   const endKey =
     endLon !== undefined && endLat !== undefined
-      ? (nearestNode(graph, endLon, endLat) ?? undefined)
+      ? nearestNode(graph, endLon, endLat)?.key
       : undefined
 
   const strategy = buildStrategy(preferences, seed, endKey)
